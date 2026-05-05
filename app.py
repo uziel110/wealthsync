@@ -342,6 +342,51 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Authentication — password gate
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _check_auth() -> bool:
+    """Return True if the user is authenticated."""
+    return st.session_state.get("authenticated", False)
+
+
+def _login_screen() -> None:
+    st.markdown("""
+    <style>
+    /* מסך כניסה — ממורכז, ללא sidebar */
+    [data-testid="stSidebar"] { display: none !important; }
+    .block-container { max-width: 420px !important; padding-top: 8rem !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="text-align:center; margin-bottom:2rem;">
+      <div style="font-size:3rem;">💰</div>
+      <div style="font-size:1.8rem; font-weight:900; color:#1E293B; font-family:Heebo,sans-serif;">
+        WealthSync
+      </div>
+      <div style="font-size:.85rem; color:#64748B; margin-top:.3rem;">מאגד השקעות אישי</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        password = st.text_input("סיסמה", type="password", placeholder="הזן סיסמה…")
+        submitted = st.form_submit_button("כניסה", type="primary", use_container_width=True)
+
+    if submitted:
+        correct = st.secrets.get("auth", {}).get("password", "")
+        if password == correct:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("סיסמה שגויה.")
+
+
+if not _check_auth():
+    _login_screen()
+    st.stop()
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Session state + auto-load from Sheets
 # ═════════════════════════════════════════════════════════════════════════════
 if "holdings" not in st.session_state:
