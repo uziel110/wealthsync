@@ -464,7 +464,7 @@ with st.sidebar:
 
     page = st.radio(
         "ניווט",
-        ["📊 לוח מחוונים", "📤 העלאה", "⚙️ הגדרות"],
+        ["📊 לוח מחוונים", "📤 העלאה", "🤖 המלצות AI", "⚙️ הגדרות"],
         label_visibility="collapsed",
     )
 
@@ -1012,11 +1012,221 @@ def page_settings() -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# דף: המלצות AI
+# ═════════════════════════════════════════════════════════════════════════════
+
+_SYSTEM_PROMPT = """אתה יועץ השקעות מקצועי המתמחה בשוק ההון הישראלי.
+אתה מנתח תיקי השקעות ומספק המלצות מבוססות נתונים, תמציתיות ומעשיות.
+
+כללים שאתה תמיד מכבד:
+- מס רווחי הון בישראל: 25% על רווח ריאלי (לאחר ניכוי אינפלציה) לאדם פרטי.
+  מכירה של נייר ברווח גוררת אירוע מס — יש לקחת זאת בחשבון לפני כל המלצת מכירה.
+- עמלות מסחר: בין 0.1% ל-0.5% לעסקה בממוצע בברוקרים ישראליים.
+  החלפת פוזיציות קטנות עשויה לעלות יותר מהתועלת.
+- פיזור: אל תמליץ על ריכוז יתר בנייר בודד.
+- אין לך גישה לנתוני שוק בזמן אמת — ציין זאת בגלוי.
+- הוסף תמיד הסתייגות: "אין לראות בכך ייעוץ השקעות מוסמך."
+
+פורמט תשובה:
+- כותרות ב-Markdown (##, ###)
+- נקודות (•) לרשימות
+- מספרים בפורמט ישראלי (₪X,XXX)
+- תשובה בעברית בלבד
+"""
+
+
+def _build_portfolio_prompt(
+    df: pd.DataFrame,
+    horizon_years: int,
+    monthly_deposit: int,
+    risk: str,
+    free_text: str,
+) -> str:
+    df = enrich(df)
+    total_val  = df["market_value"].sum()
+    total_cost = df["cost_basis"].sum()
+    total_gl   = total_val - total_cost
+    gl_pct     = (total_gl / total_cost * 100) if total_cost else 0
+
+    # סיכום לפי סוג
+    by_type = (
+        df.groupby("asset_type")
+        .agg(market_value=("market_value", "sum"), count=("asset_name", "count"))
+        .reset_index()
+    )
+    by_type["pct"]   = by_type["market_value"] / total_val * 100
+    by_type["label"] = by_type["asset_type"].map(TYPE_HE)
+
+    type_summary = "\n".join(
+        f"  • {r['label']}: ₪{r['market_value']:,.0f} ({r['pct']:.1f}%, {r['count']} ניירות)"
+        for _, r in by_type.iterrows()
+    )
+
+    # פירוט ניירות
+    holdings_lines = []
+    for _, r in df.sort_values("market_value", ascending=False).iterrows():
+        gl      = r["market_value"] - r["cost_basis"]
+        gl_p    = (gl / r["cost_basis"] * 100) if r["cost_basis"] else 0
+        gl_str  = f"רווח ₪{gl:,.0f} ({gl_p:+.1f}%)" if gl >= 0 else f"הפסד ₪{abs(gl):,.0f} ({gl_p:+.1f}%)"
+        currency = r.get("currency", "")
+        cur_str  = f" [{currency}]" if currency else ""
+        holdings_lines.append(
+            f"  • {r['asset_name']} ({r['asset_id']}){cur_str} | "
+            f"שווי ₪{r['market_value']:,.0f} | {gl_str} | סוג: {TYPE_HE.get(r['asset_type'], r['asset_type'])}"
+        )
+    holdings_text = "\n".join(holdings_lines)
+
+    risk_map = {"נמוכה": "שמרני", "בינונית": "מאוזן", "גבוהה": "אגרסיבי"}
+
+    prompt = f"""## פרטי המשקיע
+
+- **אופק השקעה:** {horizon_years} שנים
+- **הפקדה חודשית מתוכננת:** ₪{monthly_deposit:,}
+- **רמת סיכון מועדפת:** {risk} ({risk_map.get(risk, risk)})
+{f'- **הערות נוספות מהמשקיע:** {free_text}' if free_text.strip() else ''}
+
+## מצב התיק הנוכחי
+
+- **שווי כולל:** ₪{total_val:,.0f}
+- **עלות כוללת:** ₪{total_cost:,.0f}
+- **רווח/הפסד לא ממומש:** ₪{total_gl:,.0f} ({gl_pct:+.1f}%)
+
+### הרכב לפי סוג נכס
+{type_summary}
+
+### פירוט ניירות ערך
+{holdings_text}
+
+---
+
+## בקשה
+
+נתח את התיק ותן המלצות מפורטות:
+
+1. **הערכת התיק הנוכחי** — חוזקות, חולשות, ריכוזים בעייתיים
+2. **המלצות לפעולה** — מה לקנות, מה לשקול למכור (תוך התחשבות במס ועמלות), מה להשאיר
+3. **להיכן להפנות את ההפקדה החודשית** של ₪{monthly_deposit:,}
+4. **אסטרטגיה לאופק של {horizon_years} שנים** — כיצד לנהל את התיק לקראת מועד המשיכה
+5. **אזהרות ספציפיות** — ניירות שדורשים תשומת לב מיוחדת
+"""
+    return prompt
+
+
+def page_ai() -> None:
+    page_header("🤖", "המלצות AI", "ניתוח תיק אישי מבוסס Gemini Flash · חינמי")
+
+    # ── בדיקת API key ─────────────────────────────────────────────────────────
+    api_key = st.secrets.get("gemini", {}).get("api_key", "")
+    if not api_key:
+        st.warning(
+            "נדרש API Key של Google Gemini.\n\n"
+            "1. היכנס ל-[aistudio.google.com](https://aistudio.google.com) → **Get API key**\n"
+            "2. הוסף ל-Streamlit Cloud Secrets:\n"
+            "```toml\n[gemini]\napi_key = \"AIza...\"\n```"
+        )
+        st.stop()
+
+    df = st.session_state.holdings
+    if df.empty:
+        st.info("טרם נטענו נתונים — עבור ל-**📤 העלאה** תחילה.")
+        return
+
+    # ── קלטי משתמש ───────────────────────────────────────────────────────────
+    section_header("פרמטרי השקעה")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        horizon = st.number_input("אופק השקעה (שנים)", min_value=1, max_value=40, value=10,
+                                  help="עוד כמה שנים תזדקק לכסף?")
+    with c2:
+        monthly = st.number_input("הפקדה חודשית מתוכננת (₪)", min_value=0,
+                                  max_value=100_000, value=2_000, step=500)
+    with c3:
+        risk = st.select_slider("רמת סיכון", options=["נמוכה", "בינונית", "גבוהה"], value="בינונית")
+
+    free_text = st.text_area(
+        "הערות / שאלות ספציפיות (אופציונלי)",
+        placeholder="לדוגמה: שוקל לעבור לברוקר זול יותר, מתעניין בחשיפה לטכנולוגיה, חושש מתנודתיות...",
+        height=90,
+    )
+
+    st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+
+    # ── סיכום תיק לפני שליחה ─────────────────────────────────────────────────
+    df_e = enrich(df)
+    total = df_e["market_value"].sum()
+    cost  = df_e["cost_basis"].sum()
+    gl    = total - cost
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("שווי תיק",    f"₪{total:,.0f}")
+    col2.metric("רווח לא ממומש", f"₪{gl:,.0f}", f"{(gl/cost*100) if cost else 0:+.1f}%")
+    col3.metric("ניירות ערך",  len(df_e))
+
+    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+
+    if not st.button("🤖 נתח את התיק וקבל המלצות", type="primary", use_container_width=False):
+        st.caption("הניתוח נשלח ל-Gemini Flash ומוחזר בסטרימינג · בד״כ 10-20 שניות")
+        return
+
+    # ── קריאה ל-Gemini ────────────────────────────────────────────────────────
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        st.error("חסר חבילה: `pip install google-generativeai`")
+        return
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        system_instruction=_SYSTEM_PROMPT,
+    )
+
+    prompt = _build_portfolio_prompt(df_e, horizon, monthly, risk, free_text)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    section_header("ניתוח AI — המלצות מותאמות אישית")
+
+    st.markdown("""
+    <div class="ws-card" style="margin-bottom:1rem; border-right: 3px solid #F59E0B;">
+      <div style="font-size:.8rem; color:#92400E; line-height:1.7;">
+        ⚠️ <strong>הסתייגות:</strong> הניתוח מבוסס על הנתונים שהעלית ועל מודל AI כללי.
+        אין לראות בכך ייעוץ השקעות מוסמך. התייעץ עם יועץ השקעות מורשה לפני כל פעולה.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    response_box = st.empty()
+    full_text = ""
+
+    with st.spinner("Gemini מנתח את התיק…"):
+        try:
+            stream = model.generate_content(prompt, stream=True)
+            for chunk in stream:
+                if chunk.text:
+                    full_text += chunk.text
+                    response_box.markdown(full_text)
+        except Exception as exc:
+            st.error(f"שגיאה בקריאה ל-Gemini: {exc}")
+            return
+
+    # כפתור להעתקה
+    st.download_button(
+        "⬇️ שמור ניתוח כקובץ טקסט",
+        data=full_text.encode("utf-8"),
+        file_name="wealthsync_ai_analysis.txt",
+        mime="text/plain",
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ניתוב
 # ═════════════════════════════════════════════════════════════════════════════
 if page == "📊 לוח מחוונים":
     page_dashboard()
 elif page == "📤 העלאה":
     page_upload()
+elif page == "🤖 המלצות AI":
+    page_ai()
 elif page == "⚙️ הגדרות":
     page_settings()
