@@ -738,46 +738,127 @@ def page_dashboard() -> None:
     st.markdown("<hr>", unsafe_allow_html=True)
     section_header("מחשבון תשואה עתידית")
 
-    col_a, col_b, col_c = st.columns([2, 2, 3])
+    # ── פרמטרים ──────────────────────────────────────────────────────────────
+    col_a, col_b, col_c = st.columns(3)
     with col_a:
         years = st.slider("אופק השקעה (שנים)", 1, 30, 10)
     with col_b:
-        cagr = st.slider("תשואה שנתית צפויה (%)", 1, 20, 7)
+        cagr = st.slider("תשואה שנתית צפויה (%)", 0, 20, 7)
     with col_c:
-        fv = total * ((1 + cagr / 100) ** years)
-        st.metric(
-            f"שווי צפוי בעוד {years} שנים",
-            f"₪{fv:,.0f}",
-            f"+₪{fv - total:,.0f}  ({((fv/total)-1)*100:.1f}%)",
+        monthly_deposit = st.number_input(
+            "הפקדה חודשית (₪)",
+            min_value=0,
+            max_value=100_000,
+            value=0,
+            step=500,
+            help="סכום קבוע שמופקד כל חודש לתיק. 0 = ללא הפקדות.",
         )
 
-    proj = pd.DataFrame({
-        "שנה":  range(years + 1),
-        "שווי צפוי": [total * ((1 + cagr/100)**y) for y in range(years + 1)],
-        "ערך נוכחי": [total] * (years + 1),
-    })
+    # ── חישוב FV עם הפקדות חודשיות ───────────────────────────────────────────
+    # FV = PV·(1+r)^n  +  PMT·((1+r)^n - 1)/r
+    # r = ריבית חודשית, n = מספר חודשים
+    r_monthly = (1 + cagr / 100) ** (1 / 12) - 1
+    n_months  = years * 12
+
+    def _fv_at_year(y: int) -> tuple[float, float, float]:
+        """Returns (total_fv, fv_from_initial, fv_from_deposits) at year y."""
+        n   = y * 12
+        fv_initial = total * (1 + r_monthly) ** n
+        if r_monthly > 0:
+            fv_deposits = monthly_deposit * ((1 + r_monthly) ** n - 1) / r_monthly
+        else:
+            fv_deposits = monthly_deposit * n
+        return fv_initial + fv_deposits, fv_initial, fv_deposits
+
+    fv_total, fv_initial, fv_deposits = _fv_at_year(years)
+    total_deposited = monthly_deposit * n_months
+
+    # ── KPI תחתון ─────────────────────────────────────────────────────────────
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric(f"שווי צפוי בעוד {years} שנים", f"₪{fv_total:,.0f}",
+              f"+₪{fv_total - total:,.0f}")
+    k2.metric("תשואה על הקרן הקיימת",  f"₪{fv_initial:,.0f}",
+              f"+₪{fv_initial - total:,.0f}")
+    k3.metric("צבירה מהפקדות חודשיות", f"₪{fv_deposits:,.0f}",
+              f"מתוך ₪{total_deposited:,.0f} הפקדות")
+    k4.metric("סך הפקדות נוספות",      f"₪{total_deposited:,.0f}",
+              f"₪{monthly_deposit:,.0f} × {n_months:,} חודשים")
+
+    # ── נתוני גרף שנה-אחר-שנה ────────────────────────────────────────────────
+    years_range   = list(range(years + 1))
+    fv_totals     = [_fv_at_year(y)[0] for y in years_range]
+    fv_initials   = [_fv_at_year(y)[1] for y in years_range]
+    fv_deps       = [_fv_at_year(y)[2] for y in years_range]
+    deposited_cum = [monthly_deposit * y * 12 for y in years_range]
+    baseline      = [total] * (years + 1)
+
     fig_proj = go.Figure()
+
+    # שטח תחתון — הפקדות שנצברו (ללא תשואה)
+    if monthly_deposit > 0:
+        fig_proj.add_trace(go.Scatter(
+            x=years_range, y=[total + d for d in deposited_cum],
+            mode="lines", name="קרן + הפקדות (ללא תשואה)",
+            line=dict(color="#CBD5E1", width=1.5, dash="dot"),
+            hovertemplate="שנה %{x}<br>קרן + הפקדות: ₪%{y:,.0f}<extra></extra>",
+        ))
+        # שטח — תרומת הפקדות לתשואה
+        fig_proj.add_trace(go.Scatter(
+            x=years_range, y=fv_totals,
+            mode="none", name="שווי כולל",
+            fill="tonexty", fillcolor="rgba(5,150,105,.10)",
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    # קו הבסיס — ללא הפקדות ובלי תשואה
     fig_proj.add_trace(go.Scatter(
-        x=proj["שנה"], y=proj["שווי צפוי"],
-        mode="lines+markers", name="שווי צפוי",
-        line=dict(color="#2563EB", width=2.5), marker=dict(size=5),
-        fill="tozeroy", fillcolor="rgba(37,99,235,.08)",
-        hovertemplate="שנה %{x}: ₪%{y:,.0f}<extra></extra>",
-    ))
-    fig_proj.add_trace(go.Scatter(
-        x=proj["שנה"], y=proj["ערך נוכחי"],
+        x=years_range, y=baseline,
         mode="lines", name="ערך נוכחי",
         line=dict(color="#94A3B8", width=1.5, dash="dash"),
         hovertemplate="₪%{y:,.0f}<extra></extra>",
     ))
+
+    # קו ראשי — שווי עם הפקדות ותשואה
+    fig_proj.add_trace(go.Scatter(
+        x=years_range, y=fv_totals,
+        mode="lines+markers", name="שווי צפוי (עם הפקדות)" if monthly_deposit > 0 else "שווי צפוי",
+        line=dict(color="#2563EB", width=2.5), marker=dict(size=5),
+        fill="tozeroy", fillcolor="rgba(37,99,235,.07)",
+        hovertemplate="שנה %{x}: ₪%{y:,.0f}<extra></extra>",
+    ))
+
     fig_proj.update_layout(
         **PLOTLY_LAYOUT,
-        height=300,
-        xaxis=dict(title="שנה", showgrid=True, gridcolor="#F1F5F9", dtick=max(1, years//10)),
-        yaxis=dict(title="שווי (₪)", showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f"),
-        legend=dict(orientation="h", x=0, y=1.14, font_size=12),
+        height=340,
+        xaxis=dict(title="שנה", showgrid=True, gridcolor="#F1F5F9",
+                   dtick=max(1, years // 10)),
+        yaxis=dict(title="שווי (₪)", showgrid=True, gridcolor="#F1F5F9",
+                   tickformat="₪,.0f"),
+        legend=dict(orientation="h", x=0, y=1.16, font_size=11),
     )
     st.plotly_chart(fig_proj, use_container_width=True)
+
+    # ── טבלת תחזית שנתית ─────────────────────────────────────────────────────
+    with st.expander("טבלת תחזית מפורטת לפי שנה"):
+        table_rows = []
+        for y in years_range:
+            fv_t, fv_i, fv_d = _fv_at_year(y)
+            table_rows.append({
+                "שנה":              y,
+                "שווי צפוי (₪)":    round(fv_t),
+                "מהקרן הקיימת (₪)": round(fv_i),
+                "מהפקדות (₪)":      round(fv_d),
+                "סך הפקדות (₪)":    monthly_deposit * y * 12,
+                "תשואה נטו (₪)":    round(fv_t - total - monthly_deposit * y * 12),
+            })
+        df_table = pd.DataFrame(table_rows)
+        st.dataframe(
+            df_table.style.format({c: "₪{:,.0f}" for c in df_table.columns if c != "שנה"}),
+            use_container_width=True,
+            height=min(420, (years + 2) * 35 + 38),
+            hide_index=True,
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
