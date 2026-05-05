@@ -1303,35 +1303,37 @@ def page_ai() -> None:
 
     genai.configure(api_key=api_key)
 
-    # Try models in order — pick the first one the API key can access
-    _CANDIDATE_MODELS = [
+    # Preferred models in order — pick the first one available for this key
+    _PREFERRED = [
         "gemini-2.0-flash-lite",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-flash",
-        "gemini-1.0-pro",
+        "gemini-2.5-flash",
+        "gemini-flash-lite-latest",
+        "gemini-flash-latest",
     ]
 
-    model = None
-    used_model = ""
-    for _name in _CANDIDATE_MODELS:
-        try:
-            _m = genai.GenerativeModel(model_name=_name, system_instruction=_SYSTEM_PROMPT)
-            # quick probe — list_models verifies key validity without spending tokens
-            _m.count_tokens("test")
-            model = _m
-            used_model = _name
-            break
-        except Exception:
-            continue
+    try:
+        _available = {
+            m.name.replace("models/", "")
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        }
+    except Exception as exc:
+        st.error(f"לא ניתן לאחזר רשימת מודלים: {exc}")
+        return
 
-    if model is None:
+    used_model = next((m for m in _PREFERRED if m in _available), None)
+    if used_model is None:
+        # fallback: just take the first available model that contains "flash"
+        used_model = next((m for m in sorted(_available) if "flash" in m), None)
+    if used_model is None:
         st.error(
             "לא נמצא מודל Gemini זמין עבור ה-API key הזה.\n\n"
-            "ודא שה-key תקף ושה-Generative Language API מופעל ב-Google Cloud Console."
+            f"מודלים זמינים: {', '.join(sorted(_available)[:5])}"
         )
         return
+
+    model = genai.GenerativeModel(model_name=used_model, system_instruction=_SYSTEM_PROMPT)
 
     prompt = _build_portfolio_prompt(df_e, horizon, monthly, risk, free_text)
 
