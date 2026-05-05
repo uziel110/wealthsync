@@ -463,7 +463,8 @@ if not st.session_state.sheets_loaded:
 
 def _save_holdings(df: pd.DataFrame) -> None:
     if not df.empty:
-        df = df.copy()
+        # always compute derived columns before saving so Sheets is never partial
+        df = enrich(df)
         df["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     st.session_state.holdings = df
     try:
