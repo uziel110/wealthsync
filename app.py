@@ -909,14 +909,133 @@ def page_upload() -> None:
             tip="ייצא מהאתר: תיק ניירות ערך ← ייצוא ל-Excel",
         )
     elif source == "לאומי טרייד":
-        _upload_generic(
-            bank_name="לאומי טרייד",
-            default_account="לאומי",
-            parser_fn=parse_leumi,
-            tip="ייצא מהאתר: תיק ניירות ערך ← ייצוא ל-Excel",
-        )
+        _leumi_upload_or_manual()
     elif source == "הראל / גמל — הזנה ידנית":
         _manual_entry_harel()
+
+
+def _leumi_upload_or_manual() -> None:
+    section_header("לאומי טרייד — העלאה או הזנה ידנית")
+
+    tab_upload, tab_manual = st.tabs(["📂 העלאת קובץ Excel", "✏️ הזנה ידנית"])
+
+    with tab_upload:
+        st.markdown("""
+        <div class="ws-card" style="margin-bottom:1rem;">
+          <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
+            ייצא מלאומי טרייד: <strong>תיק ניירות ערך ← ייצוא ל-Excel</strong><br>
+            אם האפשרות אינה זמינה, השתמש בלשונית ההזנה הידנית.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        account_name = st.text_input("שם החשבון", value="לאומי", key="leumi_acc_upload")
+        uploaded = st.file_uploader("קובץ Excel מלאומי טרייד", type=["xlsx", "xls"], key="leumi_file")
+
+        if uploaded is not None:
+            with st.spinner("מנתח…"):
+                try:
+                    df = parse_leumi(io.BytesIO(uploaded.read()), account_name=account_name)
+                    df = enrich(df)
+                except Exception as exc:
+                    st.error(f"שגיאה בפענוח: {exc}")
+                    df = None
+
+            if df is not None:
+                total_val  = df["market_value"].sum()
+                total_cost = df["cost_basis"].sum()
+                gain       = total_val - total_cost
+                m1, m2, m3 = st.columns(3)
+                m1.metric("ניירות שפוענחו", len(df))
+                m2.metric("שווי כולל",      f"₪{total_val:,.0f}")
+                m3.metric("רווח / הפסד",    f"₪{gain:,.0f}",
+                          f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
+
+                show_cols = ["account", "asset_type", "asset_name", "asset_id",
+                             "quantity", "cost_basis", "market_value"]
+                st.dataframe(
+                    _display(df, show_cols).style.format({
+                        "כמות": "{:,.4f}", "עלות (₪)": "₪{:,.2f}", "שווי נוכחי (₪)": "₪{:,.2f}",
+                    }),
+                    use_container_width=True, height=280,
+                )
+                if st.button("✅ הוסף לתיק ושמור", type="primary", key="leumi_save_upload"):
+                    existing = st.session_state.holdings
+                    if not existing.empty:
+                        existing = existing[existing["account"] != account_name]
+                    _save_holdings(pd.concat([existing, df], ignore_index=True))
+                    st.success(f"✓ חשבון **{account_name}** נוסף לתיק ונשמר.")
+
+    with tab_manual:
+        _manual_entry_securities(account_name_default="לאומי", source_tag="לאומי", form_key="leumi")
+
+
+def _manual_entry_securities(
+    account_name_default: str,
+    source_tag: str,
+    form_key: str,
+) -> None:
+    """Generic manual entry form for individual securities (stocks, ETFs, funds)."""
+    st.markdown("""
+    <div class="ws-card" style="margin-bottom:1rem;">
+      <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
+        הזן כל נייר ערך בנפרד. ניתן להוסיף מספר ניירות ברצף.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    account_name = st.text_input("שם החשבון", value=account_name_default,
+                                 key=f"{form_key}_acc_manual")
+
+    # show existing rows for this account so user can see what's already entered
+    existing_all = st.session_state.holdings
+    existing_acc = (
+        existing_all[existing_all["account"] == account_name]
+        if not existing_all.empty else pd.DataFrame()
+    )
+    if not existing_acc.empty:
+        st.caption(f"ניירות קיימים בחשבון {account_name}:")
+        show_cols = ["asset_name", "asset_id", "cost_basis", "market_value"]
+        st.dataframe(
+            _display(existing_acc, [c for c in show_cols if c in existing_acc.columns])
+            .style.format({
+                "עלות (₪)": "₪{:,.2f}", "שווי נוכחי (₪)": "₪{:,.2f}",
+            }),
+            use_container_width=True, height=min(200, len(existing_acc) * 35 + 38),
+            hide_index=True,
+        )
+
+    st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+
+    with st.form(f"{form_key}_manual_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            asset_name = st.text_input("שם הנייר", placeholder="לדוגמה: מניות אפל / קרן מחקה ת\"א 125")
+            asset_id   = st.text_input("מספר נייר / סימבול", placeholder="לדוגמה: 662577 / AAPL")
+            quantity   = st.number_input("כמות", min_value=0.0, step=1.0, format="%.4f")
+        with c2:
+            cost_basis   = st.number_input("עלות רכישה (₪)", min_value=0.0, step=100.0,
+                                           help="סך הכסף ששולם בעת הרכישה")
+            market_value = st.number_input("שווי נוכחי (₪)", min_value=0.0, step=100.0,
+                                           help="שווי השוק היום")
+
+        submitted = st.form_submit_button("➕ הוסף נייר לתיק", type="primary", use_container_width=True)
+
+    if submitted and asset_name.strip():
+        row = pd.DataFrame([{
+            "account":      account_name,
+            "asset_name":   asset_name.strip(),
+            "asset_id":     asset_id.strip(),
+            "quantity":     quantity,
+            "cost_basis":   cost_basis,
+            "market_value": market_value,
+            "source":       source_tag,
+        }])
+        existing_other = existing_all[existing_all["account"] != account_name] \
+            if not existing_all.empty else pd.DataFrame()
+        _save_holdings(pd.concat([existing_other, existing_acc, row], ignore_index=True))
+        st.success(f"✓ **{asset_name}** נוסף לחשבון {account_name}.")
+        st.rerun()
+    elif submitted:
+        st.warning("נא להזין שם נייר.")
 
 
 def _upload_generic(
@@ -1045,28 +1164,8 @@ def _upload_ibi() -> None:
 
 
 def _manual_entry_harel() -> None:
-    section_header("פנסיה / גמל / הראל — הזנה ידנית")
-
-    with st.form("harel_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            asset_name   = st.text_input("שם הקרן / המסלול")
-            quantity     = st.number_input("יחידות / יתרה צבורה", min_value=0.0, step=0.01)
-        with c2:
-            cost_basis   = st.number_input("סך הפקדות (₪)", min_value=0.0, step=100.0)
-            market_value = st.number_input("שווי נוכחי (₪)", min_value=0.0, step=100.0)
-        submitted = st.form_submit_button("➕ הוסף לתיק", type="primary", use_container_width=True)
-
-    if submitted and asset_name:
-        row = pd.DataFrame([{
-            "account": "הראל", "asset_name": asset_name, "asset_id": "",
-            "quantity": quantity, "cost_basis": cost_basis,
-            "market_value": market_value, "source": "ידני",
-        }])
-        _save_holdings(pd.concat([st.session_state.holdings, row], ignore_index=True))
-        st.success(f"✓ הקרן **{asset_name}** נוספה ונשמרה.")
-    elif submitted:
-        st.warning("נא להזין שם קרן.")
+    section_header("פנסיה / גמל — הזנה ידנית")
+    _manual_entry_securities(account_name_default="הראל", source_tag="ידני", form_key="harel")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
