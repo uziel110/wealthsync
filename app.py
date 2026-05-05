@@ -1218,7 +1218,7 @@ def _build_portfolio_prompt(
 
 
 def page_ai() -> None:
-    page_header("🤖", "המלצות AI", "ניתוח תיק אישי מבוסס Gemini 1.5 Flash · חינמי")
+    page_header("🤖", "המלצות AI", "ניתוח תיק אישי מבוסס Google Gemini · חינמי")
 
     # ── בדיקת API key ─────────────────────────────────────────────────────────
     api_key = st.secrets.get("gemini", {}).get("api_key", "")
@@ -1282,16 +1282,41 @@ def page_ai() -> None:
         return
 
     genai.configure(api_key=api_key)
-    # gemini-1.5-flash is available on the free tier (15 RPM, 1M TPM)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=_SYSTEM_PROMPT,
-    )
+
+    # Try models in order — pick the first one the API key can access
+    _CANDIDATE_MODELS = [
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash",
+        "gemini-1.0-pro",
+    ]
+
+    model = None
+    used_model = ""
+    for _name in _CANDIDATE_MODELS:
+        try:
+            _m = genai.GenerativeModel(model_name=_name, system_instruction=_SYSTEM_PROMPT)
+            # quick probe — list_models verifies key validity without spending tokens
+            _m.count_tokens("test")
+            model = _m
+            used_model = _name
+            break
+        except Exception:
+            continue
+
+    if model is None:
+        st.error(
+            "לא נמצא מודל Gemini זמין עבור ה-API key הזה.\n\n"
+            "ודא שה-key תקף ושה-Generative Language API מופעל ב-Google Cloud Console."
+        )
+        return
 
     prompt = _build_portfolio_prompt(df_e, horizon, monthly, risk, free_text)
 
     st.markdown("<hr>", unsafe_allow_html=True)
-    section_header("ניתוח AI — המלצות מותאמות אישית")
+    section_header(f"ניתוח AI — המלצות מותאמות אישית ({used_model})")
 
     st.markdown("""
     <div class="ws-card" style="margin-bottom:1rem; border-right: 3px solid #F59E0B;">
@@ -1305,7 +1330,7 @@ def page_ai() -> None:
     response_box = st.empty()
     full_text = ""
 
-    with st.spinner("Gemini מנתח את התיק…"):
+    with st.spinner(f"{used_model} מנתח את התיק…"):
         try:
             stream = model.generate_content(prompt, stream=True)
             for chunk in stream:
