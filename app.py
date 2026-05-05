@@ -5,11 +5,14 @@ WealthSync — מאגד השקעות אישי
 
 from __future__ import annotations
 import io
+from datetime import datetime
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
 from parsers.ibi_parser import parse_ibi
+from parsers.hapoalim_parser import parse_hapoalim
+from parsers.leumi_parser import parse_leumi
 
 # ═════════════════════════════════════════════════════════════════════════════
 # קונפיגורציה
@@ -413,6 +416,9 @@ if not st.session_state.sheets_loaded:
 
 
 def _save_holdings(df: pd.DataFrame) -> None:
+    if not df.empty:
+        df = df.copy()
+        df["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     st.session_state.holdings = df
     try:
         from sheets.gsheets import upsert_holdings
@@ -422,15 +428,17 @@ def _save_holdings(df: pd.DataFrame) -> None:
 
 
 COL_LABELS = {
-    "account":    "חשבון",
-    "asset_name": "שם נייר",
-    "asset_id":   "מספר נייר",
-    "asset_type": "סוג",
-    "quantity":   "כמות",
-    "cost_basis": "עלות (₪)",
+    "account":      "חשבון",
+    "asset_name":   "שם נייר",
+    "asset_id":     "מספר נייר",
+    "asset_type":   "סוג",
+    "quantity":     "כמות",
+    "cost_basis":   "עלות (₪)",
     "market_value": "שווי נוכחי (₪)",
-    "gain_loss":  "רווח/הפסד (₪)",
-    "gain_pct":   "תשואה %",
+    "gain_loss":    "רווח/הפסד (₪)",
+    "gain_pct":     "תשואה %",
+    "updated_at":   "עדכון אחרון",
+    "source":       "מקור",
 }
 
 TYPE_HE = {
@@ -481,6 +489,10 @@ with st.sidebar:
         _df_e  = enrich(_df_s)
         _types = _df_e["asset_type"].map(TYPE_HE).value_counts()
 
+        _last_update = ""
+        if "updated_at" in _df_s.columns:
+            _last_update = _df_s["updated_at"].dropna().max() or ""
+
         st.markdown(f"""
         <div style="background:rgba(255,255,255,.07);border-radius:10px;padding:.9rem 1rem;margin:.5rem 0;">
           <div style="font-size:.68rem;color:#94A3B8;text-align:right;margin-bottom:.4rem;
@@ -493,6 +505,7 @@ with st.sidebar:
           </div>
           <div style="font-size:.72rem;color:#94A3B8;text-align:right;margin-top:.6rem;line-height:1.6;">
             {len(_df_s)} ניירות · {_df_s['account'].nunique()} חשבונות
+            {f'<br>עדכון אחרון: {_last_update}' if _last_update else ''}
           </div>
         </div>
         <div style="margin-top:.5rem;">
@@ -721,6 +734,8 @@ def page_dashboard() -> None:
 
     show_cols = ["account", "asset_type", "asset_name", "asset_id",
                  "quantity", "cost_basis", "market_value", "gain_loss", "gain_pct"]
+    if "updated_at" in df.columns:
+        show_cols.append("updated_at")
     fmt = {
         "כמות":              "{:,.4f}",
         "עלות (₪)":          "₪{:,.2f}",
@@ -865,20 +880,99 @@ def page_dashboard() -> None:
 # דף: העלאה
 # ═════════════════════════════════════════════════════════════════════════════
 def page_upload() -> None:
-    page_header("📤", "העלאת קובץ החזקות", "פרסר אקסל אוטומטי מ-IBI/פסגות · הזנה ידנית")
+    page_header("📤", "העלאת קובץ החזקות", "פרסר אקסל אוטומטי · IBI/פסגות · הפועלים · לאומי טרייד · הזנה ידנית")
 
     source = st.selectbox(
         "בחר מקור נתונים",
-        ["IBI / פסגות", "בנק לאומי (בקרוב)", "בנק הפועלים (בקרוב)", "הראל — הזנה ידנית"],
+        ["IBI / פסגות", "בנק הפועלים", "לאומי טרייד", "הראל / גמל — הזנה ידנית"],
     )
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
     if source == "IBI / פסגות":
         _upload_ibi()
-    elif source == "הראל — הזנה ידנית":
+    elif source == "בנק הפועלים":
+        _upload_generic(
+            bank_name="בנק הפועלים",
+            default_account="הפועלים",
+            parser_fn=parse_hapoalim,
+            tip="ייצא מהאתר: תיק ניירות ערך ← ייצוא ל-Excel",
+        )
+    elif source == "לאומי טרייד":
+        _upload_generic(
+            bank_name="לאומי טרייד",
+            default_account="לאומי",
+            parser_fn=parse_leumi,
+            tip="ייצא מהאתר: תיק ניירות ערך ← ייצוא ל-Excel",
+        )
+    elif source == "הראל / גמל — הזנה ידנית":
         _manual_entry_harel()
-    else:
-        st.info(f"הפרסר עבור **{source}** עדיין בפיתוח.")
+
+
+def _upload_generic(
+    bank_name: str,
+    default_account: str,
+    parser_fn,
+    tip: str = "",
+) -> None:
+    section_header(f"העלאת קובץ — {bank_name}")
+
+    if tip:
+        st.markdown(f"""
+        <div class="ws-card" style="margin-bottom:1rem;">
+          <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
+            {tip}<br>
+            המערכת מזהה אוטומטית את מבנה הקובץ ומנרמלת את הנתונים.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+    account_name = st.text_input("שם החשבון", value=default_account,
+                                 help="השם שיופיע בלוח המחוונים.")
+    uploaded = st.file_uploader("גרור לכאן קובץ Excel או לחץ לבחירה", type=["xlsx", "xls"],
+                                key=f"upload_{bank_name}")
+
+    if uploaded is None:
+        return
+
+    with st.spinner("מנתח ומנרמל נתונים…"):
+        try:
+            df = parser_fn(io.BytesIO(uploaded.read()), account_name=account_name)
+            df = enrich(df)
+        except Exception as exc:
+            st.error(f"שגיאה בפענוח: {exc}")
+            st.caption(
+                "אם הקובץ לא מזוהה, נסה להעתיק את הנתונים לתבנית ידנית "
+                "או צור קשר עם התמיכה."
+            )
+            return
+
+    total_val  = df["market_value"].sum()
+    total_cost = df["cost_basis"].sum()
+    gain       = total_val - total_cost
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("ניירות ערך שפוענחו", len(df))
+    m2.metric("שווי כולל בקובץ",   f"₪{total_val:,.0f}")
+    m3.metric("רווח / הפסד",       f"₪{gain:,.0f}",
+              f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
+
+    show_cols = ["account", "asset_type", "asset_name", "asset_id",
+                 "quantity", "cost_basis", "market_value"]
+    st.dataframe(
+        _display(df, show_cols).style.format({
+            "כמות":           "{:,.4f}",
+            "עלות (₪)":       "₪{:,.2f}",
+            "שווי נוכחי (₪)": "₪{:,.2f}",
+        }),
+        use_container_width=True, height=300,
+    )
+
+    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+    if st.button("✅ הוסף לתיק ושמור", type="primary", key=f"save_{bank_name}"):
+        existing = st.session_state.holdings
+        if not existing.empty:
+            existing = existing[existing["account"] != account_name]
+        _save_holdings(pd.concat([existing, df], ignore_index=True))
+        st.success(f"✓ חשבון **{account_name}** נוסף לתיק ונשמר.")
 
 
 def _upload_ibi() -> None:
@@ -940,7 +1034,7 @@ def _upload_ibi() -> None:
 
 
 def _manual_entry_harel() -> None:
-    section_header("קרן פנסיה / גמל — הזנה ידנית")
+    section_header("פנסיה / גמל / הראל — הזנה ידנית")
 
     with st.form("harel_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
@@ -1113,7 +1207,7 @@ def _build_portfolio_prompt(
 
 
 def page_ai() -> None:
-    page_header("🤖", "המלצות AI", "ניתוח תיק אישי מבוסס Gemini Flash · חינמי")
+    page_header("🤖", "המלצות AI", "ניתוח תיק אישי מבוסס Gemini 1.5 Flash · חינמי")
 
     # ── בדיקת API key ─────────────────────────────────────────────────────────
     api_key = st.secrets.get("gemini", {}).get("api_key", "")
@@ -1177,8 +1271,9 @@ def page_ai() -> None:
         return
 
     genai.configure(api_key=api_key)
+    # gemini-1.5-flash is available on the free tier (15 RPM, 1M TPM)
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-1.5-flash",
         system_instruction=_SYSTEM_PROMPT,
     )
 
