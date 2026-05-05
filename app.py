@@ -332,14 +332,24 @@ def classify_asset(row: pd.Series) -> str:
     return "stock"
 
 
+def _to_num(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(
+        series.astype(str).str.replace(",", "", regex=False), errors="coerce"
+    )
+
+
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     """Add asset_type + gain_loss columns if not present."""
     df = df.copy()
+    # ensure core numeric columns are actually numeric (Sheets round-trips them as strings)
+    for col in ("quantity", "cost_basis", "market_value", "gain_loss", "gain_pct"):
+        if col in df.columns:
+            df[col] = _to_num(df[col])
     if "asset_type" not in df.columns:
         df["asset_type"] = df.apply(classify_asset, axis=1)
-    if "gain_loss" not in df.columns:
+    if "gain_loss" not in df.columns or df["gain_loss"].isna().all():
         df["gain_loss"] = df["market_value"] - df["cost_basis"]
-    if "gain_pct" not in df.columns:
+    if "gain_pct" not in df.columns or df["gain_pct"].isna().all():
         df["gain_pct"] = df["gain_loss"] / df["cost_basis"].replace(0, float("nan")) * 100
     return df
 
@@ -403,7 +413,8 @@ if not st.session_state.sheets_loaded:
         from sheets.gsheets import read_sheet
         _raw = read_sheet("holdings")
         if not _raw.empty:
-            for _c in ("quantity", "cost_basis", "market_value"):
+            for _c in ("quantity", "cost_basis", "market_value", "gain_loss", "gain_pct",
+                       "last_price", "change_pct", "avg_cost_price", "total_gl_ils"):
                 if _c in _raw.columns:
                     _raw[_c] = pd.to_numeric(
                         _raw[_c].astype(str).str.replace(",", "", regex=False), errors="coerce"
