@@ -1,0 +1,35 @@
+# Secrets & credentials — NEVER commit these
+*.json
+*.env
+.env.*
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+pip-log.txt
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/cache/
+
+# Claude Code settings (local only)
+.claude/
