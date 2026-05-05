@@ -339,18 +339,53 @@ def _to_num(series: pd.Series) -> pd.Series:
 
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
-    """Add asset_type + gain_loss columns if not present."""
+    """Ensure all derived columns exist and are fully populated."""
     df = df.copy()
-    # ensure core numeric columns are actually numeric (Sheets round-trips them as strings)
+
+    # strip RTL/LTR unicode control chars from text columns
+    for col in ("asset_name", "asset_id"):
+        if col in df.columns:
+            df[col] = (
+                df[col].astype(str)
+                .str.replace(r"[‎‏‪-‮⁦-⁩]", "", regex=True)
+                .str.strip()
+            )
+
+    # numeric conversion — Sheets round-trips everything as strings
     for col in ("quantity", "cost_basis", "market_value", "gain_loss", "gain_pct"):
         if col in df.columns:
             df[col] = _to_num(df[col])
+
+    # asset_type — classify rows that are missing or blank
     if "asset_type" not in df.columns:
         df["asset_type"] = df.apply(classify_asset, axis=1)
-    if "gain_loss" not in df.columns or df["gain_loss"].isna().all():
+    else:
+        blank = df["asset_type"].isna() | (df["asset_type"].astype(str).str.strip() == "")
+        if blank.any():
+            df.loc[blank, "asset_type"] = df[blank].apply(classify_asset, axis=1)
+
+    # gain_loss — fill NaN rows (don't overwrite valid values)
+    if "gain_loss" not in df.columns:
         df["gain_loss"] = df["market_value"] - df["cost_basis"]
-    if "gain_pct" not in df.columns or df["gain_pct"].isna().all():
+    else:
+        missing = df["gain_loss"].isna()
+        if missing.any():
+            df.loc[missing, "gain_loss"] = (
+                df.loc[missing, "market_value"] - df.loc[missing, "cost_basis"]
+            )
+
+    # gain_pct — fill NaN rows
+    if "gain_pct" not in df.columns:
         df["gain_pct"] = df["gain_loss"] / df["cost_basis"].replace(0, float("nan")) * 100
+    else:
+        missing = df["gain_pct"].isna()
+        if missing.any():
+            df.loc[missing, "gain_pct"] = (
+                df.loc[missing, "gain_loss"]
+                / df.loc[missing, "cost_basis"].replace(0, float("nan"))
+                * 100
+            )
+
     return df
 
 
