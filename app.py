@@ -1231,6 +1231,26 @@ def page_ai() -> None:
         )
         st.stop()
 
+    # ── כלי אבחון ────────────────────────────────────────────────────────────
+    with st.expander("🔧 אבחון חיבור Gemini"):
+        st.caption(f"API key: `{api_key[:8]}...{api_key[-4:]}` ({len(api_key)} תווים)")
+        if st.button("בדוק אילו מודלים זמינים", key="diag_models"):
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                available = [
+                    m.name for m in genai.list_models()
+                    if "generateContent" in m.supported_generation_methods
+                ]
+                if available:
+                    st.success("מודלים זמינים:")
+                    for name in available:
+                        st.code(name)
+                else:
+                    st.error("לא נמצאו מודלים זמינים עם ה-key הזה.")
+            except Exception as exc:
+                st.error(f"שגיאה: {exc}")
+
     df = st.session_state.holdings
     if df.empty:
         st.info("טרם נטענו נתונים — עבור ל-**📤 העלאה** תחילה.")
