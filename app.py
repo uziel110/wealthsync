@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from parsers.ibi_parser import parse_ibi
 from parsers.hapoalim_parser import parse_hapoalim
 from parsers.leumi_parser import parse_leumi
+from parsers.gamel_pdf_parser import parse_gamel_pdf
 
 # ═════════════════════════════════════════════════════════════════════════════
 # קונפיגורציה
@@ -306,6 +307,7 @@ TYPE_LABELS = {
     "fund":    "קרן מחקה / נאמנות",
     "pension": "פנסיה / גמל",
     "stock":   "מניה",
+    "gamel":   "גמל להשקעה",
 }
 
 TYPE_COLORS = {
@@ -313,11 +315,15 @@ TYPE_COLORS = {
     "fund":    "#D97706",
     "pension": "#7C3AED",
     "stock":   "#059669",
+    "gamel":   "#0891B2",
 }
 
 
 def classify_asset(row: pd.Series) -> str:
-    if str(row.get("source", "")).strip() == "ידני":
+    src = str(row.get("source", "")).strip()
+    if src == "גמל PDF":
+        return "gamel"
+    if src == "ידני":
         return "pension"
     name = str(row.get("asset_name", "")).lower()
     aid  = str(row.get("asset_id",   "")).strip()
@@ -494,6 +500,7 @@ TYPE_HE = {
     "fund":    "קרן מחקה",
     "pension": "פנסיה",
     "stock":   "מניה",
+    "gamel":   "גמל להשקעה",
 }
 
 
@@ -1244,7 +1251,8 @@ def page_upload() -> None:
 
     source = st.selectbox(
         "בחר מקור נתונים",
-        ["IBI / פסגות", "בנק הפועלים", "לאומי טרייד", "הראל / גמל — הזנה ידנית"],
+        ["IBI / פסגות", "בנק הפועלים", "לאומי טרייד",
+         "גמל להשקעה הראל — PDF", "הראל / גמל — הזנה ידנית"],
     )
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
@@ -1259,6 +1267,8 @@ def page_upload() -> None:
         )
     elif source == "לאומי טרייד":
         _leumi_upload_or_manual()
+    elif source == "גמל להשקעה הראל — PDF":
+        _upload_gamel_pdf()
     elif source == "הראל / גמל — הזנה ידנית":
         _manual_entry_harel()
 
@@ -1505,6 +1515,64 @@ def _upload_ibi() -> None:
 
     st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
     if st.button("✅ הוסף לתיק ושמור", type="primary"):
+        existing = st.session_state.holdings
+        if not existing.empty:
+            existing = existing[existing["account"] != account_name]
+        _save_holdings(pd.concat([existing, df], ignore_index=True))
+        st.success(f"✓ חשבון **{account_name}** נוסף לתיק ונשמר.")
+
+
+def _upload_gamel_pdf() -> None:
+    section_header("קופת גמל להשקעה — העלאת PDF מהראל")
+
+    st.markdown("""
+    <div class="ws-card" style="margin-bottom:1rem;">
+      <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
+        הורד את דוח <strong>מידע אישי — תכנית גמל להשקעה</strong> מאתר הראל ביטוח ופיננסים<br>
+        ← <strong>אזור אישי ← גמל להשקעה ← הדפסת דוח</strong><br>
+        המערכת מחלצת את מסלולי ההשקעה, הצבירה ועלות הרכישה אוטומטית.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    account_name = st.text_input("שם החשבון", value="גמל הראל",
+                                 help="השם שיופיע בלוח המחוונים.")
+    uploaded = st.file_uploader("גרור לכאן קובץ PDF או לחץ לבחירה", type=["pdf"],
+                                key="upload_gamel_pdf")
+
+    if uploaded is None:
+        return
+
+    with st.spinner("מנתח PDF…"):
+        try:
+            df = parse_gamel_pdf(io.BytesIO(uploaded.read()), account_name=account_name)
+            df = enrich(df)
+        except Exception as exc:
+            st.error(f"שגיאה בפענוח: {exc}")
+            st.caption("ודא שהקובץ הוא דוח PDF תקני מהראל גמל להשקעה.")
+            return
+
+    total_val  = df["market_value"].sum()
+    total_cost = df["cost_basis"].sum()
+    gain       = total_val - total_cost
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("מסלולים שזוהו",    len(df))
+    m2.metric("צבירה כוללת",      f"₪{total_val:,.0f}")
+    m3.metric("עלות רכישה",       f"₪{total_cost:,.0f}")
+    m4.metric("רווח לא ממומש",    f"₪{gain:,.0f}",
+              f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
+
+    show_cols = ["account", "asset_type", "asset_name", "cost_basis", "market_value"]
+    st.dataframe(
+        _display(df, show_cols).style.format({
+            "עלות (₪)":       "₪{:,.2f}",
+            "שווי נוכחי (₪)": "₪{:,.2f}",
+        }),
+        use_container_width=True,
+    )
+
+    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+    if st.button("✅ הוסף לתיק ושמור", type="primary", key="save_gamel_pdf"):
         existing = st.session_state.holdings
         if not existing.empty:
             existing = existing[existing["account"] != account_name]
