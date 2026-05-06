@@ -463,13 +463,14 @@ if not st.session_state.sheets_loaded:
 
 def _save_holdings(df: pd.DataFrame) -> None:
     if not df.empty:
-        # always compute derived columns before saving so Sheets is never partial
         df = enrich(df)
         df["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     st.session_state.holdings = df
     try:
-        from sheets.gsheets import upsert_holdings
+        from sheets.gsheets import upsert_holdings, append_snapshot
         upsert_holdings(df)
+        if not df.empty:
+            append_snapshot(df)
     except Exception:
         pass
 
@@ -519,7 +520,7 @@ with st.sidebar:
 
     page = st.radio(
         "ניווט",
-        ["📊 לוח מחוונים", "📤 העלאה", "🤖 המלצות AI", "⚙️ הגדרות"],
+        ["📊 לוח מחוונים", "📈 היסטוריה", "📤 העלאה", "🤖 המלצות AI", "⚙️ הגדרות"],
         label_visibility="collapsed",
     )
 
@@ -921,6 +922,263 @@ def page_dashboard() -> None:
             height=min(420, (years + 2) * 35 + 38),
             hide_index=True,
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# דף: היסטוריה
+# ═════════════════════════════════════════════════════════════════════════════
+def page_history() -> None:
+    page_header("📈", "היסטוריית תיק", "שינוי שווי לאורך זמן · מבוסס תמונות מצב יומיות")
+
+    # ── load snapshots ────────────────────────────────────────────────────────
+    with st.spinner("טוען היסטוריה…"):
+        try:
+            from sheets.gsheets import read_snapshots, append_snapshot
+            df_snap = read_snapshots()
+        except Exception as exc:
+            st.error(f"שגיאה בטעינת היסטוריה: {exc}")
+            return
+
+    # ── no data yet ───────────────────────────────────────────────────────────
+    if df_snap.empty:
+        st.info(
+            "עדיין אין נתוני היסטוריה.\n\n"
+            "תמונות מצב נשמרות אוטומטית בכל פעם שמעלים קובץ או מזינים נתונים. "
+            "לחץ על הכפתור למטה כדי לצלם את המצב הנוכחי."
+        )
+        _snapshot_button()
+        return
+
+    # ── record today manually if needed ──────────────────────────────────────
+    _snapshot_button()
+
+    # ── parse & validate dates ────────────────────────────────────────────────
+    df_snap["snapshot_date"] = pd.to_datetime(df_snap["snapshot_date"], errors="coerce")
+    df_snap = df_snap.dropna(subset=["snapshot_date"])
+    if df_snap.empty:
+        st.warning("נתוני תאריכים לא תקינים בהיסטוריה.")
+        return
+
+    # ── filter bar ────────────────────────────────────────────────────────────
+    section_header("סינון")
+    fc1, fc2, fc3 = st.columns(3)
+
+    all_accounts = sorted(df_snap["account"].dropna().unique().tolist())
+    all_types    = sorted(df_snap["asset_type"].dropna().unique().tolist())
+    date_min     = df_snap["snapshot_date"].min().date()
+    date_max     = df_snap["snapshot_date"].max().date()
+
+    with fc1:
+        sel_accounts = st.multiselect("חשבון", all_accounts, default=all_accounts, key="hist_acc")
+    with fc2:
+        type_labels  = {k: TYPE_HE.get(k, k) for k in all_types}
+        sel_type_lbl = st.multiselect(
+            "סוג נכס",
+            list(type_labels.values()),
+            default=list(type_labels.values()),
+            key="hist_type",
+        )
+        rev = {v: k for k, v in type_labels.items()}
+        sel_types = [rev[l] for l in sel_type_lbl if l in rev]
+    with fc3:
+        date_range = st.date_input(
+            "טווח תאריכים",
+            value=(date_min, date_max),
+            min_value=date_min,
+            max_value=date_max,
+            key="hist_dates",
+        )
+
+    d_from = pd.Timestamp(date_range[0] if isinstance(date_range, (list, tuple)) else date_range)
+    d_to   = pd.Timestamp(date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) > 1 else date_max)
+
+    df_f = df_snap[
+        df_snap["account"].isin(sel_accounts) &
+        df_snap["asset_type"].isin(sel_types) &
+        (df_snap["snapshot_date"] >= d_from) &
+        (df_snap["snapshot_date"] <= d_to)
+    ]
+
+    if df_f.empty:
+        st.warning("אין נתונים לפי הסינון הנבחר.")
+        return
+
+    # ── daily aggregates ──────────────────────────────────────────────────────
+    daily_total = (
+        df_f.groupby("snapshot_date")
+        .agg(market_value=("market_value", "sum"), cost_basis=("cost_basis", "sum"))
+        .reset_index()
+        .sort_values("snapshot_date")
+    )
+    daily_total["gain_loss"] = daily_total["market_value"] - daily_total["cost_basis"]
+    daily_total["gain_pct"]  = daily_total["gain_loss"] / daily_total["cost_basis"].replace(0, float("nan")) * 100
+
+    # ── Chart 1: total portfolio value over time ──────────────────────────────
+    section_header("שווי תיק כולל לאורך זמן")
+
+    fig_total = go.Figure()
+    fig_total.add_trace(go.Scatter(
+        x=daily_total["snapshot_date"],
+        y=daily_total["cost_basis"],
+        name="עלות רכישה",
+        line=dict(color="#94A3B8", width=1.5, dash="dot"),
+        hovertemplate="%{x|%d/%m/%Y}<br>עלות: ₪%{y:,.0f}<extra></extra>",
+    ))
+    fig_total.add_trace(go.Scatter(
+        x=daily_total["snapshot_date"],
+        y=daily_total["market_value"],
+        name="שווי שוק",
+        line=dict(color="#2563EB", width=2.5),
+        fill="tozeroy",
+        fillcolor="rgba(37,99,235,.07)",
+        hovertemplate="%{x|%d/%m/%Y}<br>שווי: ₪%{y:,.0f}<extra></extra>",
+        mode="lines+markers",
+        marker=dict(size=6),
+    ))
+    fig_total.update_layout(
+        **PLOTLY_LAYOUT,
+        height=320,
+        xaxis=dict(title="תאריך", showgrid=True, gridcolor="#F1F5F9", tickformat="%d/%m/%y"),
+        yaxis=dict(title="שווי (₪)", showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f"),
+        legend=dict(orientation="h", x=0, y=1.15, font_size=11),
+    )
+    st.plotly_chart(fig_total, use_container_width=True)
+
+    # ── KPIs for selected range ───────────────────────────────────────────────
+    if len(daily_total) >= 2:
+        first_val = daily_total["market_value"].iloc[0]
+        last_val  = daily_total["market_value"].iloc[-1]
+        delta_abs = last_val - first_val
+        delta_pct = (delta_abs / first_val * 100) if first_val else 0
+        last_gl   = daily_total["gain_loss"].iloc[-1]
+        last_glp  = daily_total["gain_pct"].iloc[-1]
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("שווי נוכחי",          f"₪{last_val:,.0f}")
+        k2.metric("שינוי בתקופה",        f"₪{delta_abs:,.0f}", f"{delta_pct:+.1f}%")
+        k3.metric("רווח/הפסד לא ממומש", f"₪{last_gl:,.0f}",   f"{last_glp:+.1f}%")
+        k4.metric("מספר תמונות מצב",     len(daily_total))
+
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+
+    # ── Chart 2: by account ───────────────────────────────────────────────────
+    if df_f["account"].nunique() > 1:
+        section_header("שווי לפי חשבון לאורך זמן")
+
+        daily_acc = (
+            df_f.groupby(["snapshot_date", "account"])["market_value"]
+            .sum()
+            .reset_index()
+            .sort_values("snapshot_date")
+        )
+
+        fig_acc = go.Figure()
+        for i, acc in enumerate(sorted(daily_acc["account"].unique())):
+            sub = daily_acc[daily_acc["account"] == acc]
+            fig_acc.add_trace(go.Scatter(
+                x=sub["snapshot_date"],
+                y=sub["market_value"],
+                name=acc,
+                line=dict(color=PALETTE[i % len(PALETTE)], width=2),
+                mode="lines+markers",
+                marker=dict(size=5),
+                hovertemplate=f"<b>{acc}</b><br>%{{x|%d/%m/%Y}}<br>₪%{{y:,.0f}}<extra></extra>",
+            ))
+        fig_acc.update_layout(
+            **PLOTLY_LAYOUT,
+            height=300,
+            xaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="%d/%m/%y"),
+            yaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f"),
+            legend=dict(orientation="h", x=0, y=1.15, font_size=11),
+        )
+        st.plotly_chart(fig_acc, use_container_width=True)
+
+    # ── Chart 3: by asset type (stacked area) ────────────────────────────────
+    section_header("הרכב תיק לאורך זמן לפי סוג נכס")
+
+    daily_type = (
+        df_f.groupby(["snapshot_date", "asset_type"])["market_value"]
+        .sum()
+        .reset_index()
+        .sort_values("snapshot_date")
+    )
+
+    fig_type = go.Figure()
+    for atype, color in TYPE_COLORS.items():
+        sub = daily_type[daily_type["asset_type"] == atype]
+        if sub.empty:
+            continue
+        fig_type.add_trace(go.Scatter(
+            x=sub["snapshot_date"],
+            y=sub["market_value"],
+            name=TYPE_HE.get(atype, atype),
+            line=dict(color=color, width=2),
+            stackgroup="one",
+            fillcolor=color.replace("#", "rgba(").rstrip(")") + ",0.6)"
+                if color.startswith("#") else color,
+            hovertemplate=f"<b>{TYPE_HE.get(atype, atype)}</b><br>%{{x|%d/%m/%Y}}<br>₪%{{y:,.0f}}<extra></extra>",
+        ))
+    fig_type.update_layout(
+        **PLOTLY_LAYOUT,
+        height=300,
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="%d/%m/%y"),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f"),
+        legend=dict(orientation="h", x=0, y=1.15, font_size=11),
+    )
+    st.plotly_chart(fig_type, use_container_width=True)
+
+    # ── Chart 4: gain/loss over time ──────────────────────────────────────────
+    section_header("רווח / הפסד לא ממומש לאורך זמן")
+
+    colors_gl = ["#059669" if v >= 0 else "#DC2626" for v in daily_total["gain_loss"]]
+    fig_gl = go.Figure(go.Bar(
+        x=daily_total["snapshot_date"],
+        y=daily_total["gain_loss"],
+        marker_color=colors_gl,
+        hovertemplate="%{x|%d/%m/%Y}<br>₪%{y:,.0f}<extra></extra>",
+    ))
+    fig_gl.update_layout(
+        **PLOTLY_LAYOUT,
+        height=260,
+        xaxis=dict(showgrid=False, tickformat="%d/%m/%y"),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f",
+                   zeroline=True, zerolinecolor="#94A3B8"),
+    )
+    st.plotly_chart(fig_gl, use_container_width=True)
+
+    # ── raw data table ────────────────────────────────────────────────────────
+    with st.expander("טבלת נתוני היסטוריה גולמיים"):
+        st.dataframe(
+            df_f.sort_values(["snapshot_date", "account", "asset_name"], ascending=[False, True, True])
+            .rename(columns={
+                "snapshot_date": "תאריך", "account": "חשבון", "asset_name": "שם נייר",
+                "asset_type": "סוג", "market_value": "שווי (₪)", "cost_basis": "עלות (₪)",
+                "gain_loss": "רווח/הפסד (₪)", "gain_pct": "תשואה %",
+            })
+            .style.format({
+                "שווי (₪)": "₪{:,.0f}", "עלות (₪)": "₪{:,.0f}",
+                "רווח/הפסד (₪)": "₪{:,.0f}", "תשואה %": "{:+.1f}%",
+            }),
+            use_container_width=True,
+            height=320,
+        )
+
+
+def _snapshot_button() -> None:
+    """Button to manually capture today's portfolio state as a snapshot."""
+    df_cur = st.session_state.holdings
+    if df_cur.empty:
+        return
+    c1, _ = st.columns([1, 4])
+    with c1:
+        if st.button("📸 צלם תמונת מצב היום", use_container_width=True):
+            try:
+                from sheets.gsheets import append_snapshot
+                append_snapshot(enrich(df_cur))
+                st.success("✓ תמונת מצב נשמרה.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"שגיאה: {exc}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1512,6 +1770,8 @@ def page_ai() -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 if page == "📊 לוח מחוונים":
     page_dashboard()
+elif page == "📈 היסטוריה":
+    page_history()
 elif page == "📤 העלאה":
     page_upload()
 elif page == "🤖 המלצות AI":
