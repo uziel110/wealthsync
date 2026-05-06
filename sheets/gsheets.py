@@ -58,25 +58,34 @@ def append_snapshot(df: pd.DataFrame, worksheet_name: str = "snapshots") -> None
     """
     Append one row per security per day to the snapshots sheet.
     Skips accounts that already have a snapshot for today to avoid duplicates.
-    Creates the sheet with headers if it doesn't exist.
     """
     if df.empty:
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
-    ws = _open_sheet(worksheet_name, rows=50000, cols=len(_SNAPSHOT_COLS))
+    ws = _open_sheet(worksheet_name, rows=10000, cols=len(_SNAPSHOT_COLS))
 
-    # ensure headers exist
+    # read existing data; check whether first row is our header
     existing_vals = ws.get_all_values()
-    if not existing_vals:
-        ws.append_row(_SNAPSHOT_COLS)
-        existing_vals = [_SNAPSHOT_COLS]
+    # filter out completely empty rows (new sheets may have thousands)
+    existing_vals = [r for r in existing_vals if any(c.strip() for c in r)]
+
+    if not existing_vals or existing_vals[0] != _SNAPSHOT_COLS:
+        # write header first, then existing data (if any non-header rows present)
+        data_rows = existing_vals if (existing_vals and existing_vals[0] != _SNAPSHOT_COLS) else []
+        ws.clear()
+        ws.update([_SNAPSHOT_COLS] + data_rows)
+        existing_vals = [_SNAPSHOT_COLS] + data_rows
 
     header = existing_vals[0]
-    existing_df = pd.DataFrame(existing_vals[1:], columns=header) if len(existing_vals) > 1 else pd.DataFrame(columns=header)
+    existing_df = (
+        pd.DataFrame(existing_vals[1:], columns=header)
+        if len(existing_vals) > 1
+        else pd.DataFrame(columns=header)
+    )
 
     # find accounts that already have a snapshot today
-    already_today = set()
+    already_today: set = set()
     if not existing_df.empty and "snapshot_date" in existing_df.columns:
         already_today = set(
             existing_df.loc[existing_df["snapshot_date"] == today, "account"].unique()
@@ -85,8 +94,11 @@ def append_snapshot(df: pd.DataFrame, worksheet_name: str = "snapshots") -> None
     # build new snapshot rows — only for accounts not yet captured today
     snap = df.copy()
     snap["snapshot_date"] = today
-    snap = snap[_SNAPSHOT_COLS + [c for c in snap.columns if c not in _SNAPSHOT_COLS]]
-    snap = snap[_SNAPSHOT_COLS]  # keep only the defined columns
+    snap = snap[[c for c in _SNAPSHOT_COLS if c in snap.columns]]
+    for c in _SNAPSHOT_COLS:
+        if c not in snap.columns:
+            snap[c] = ""
+    snap = snap[_SNAPSHOT_COLS]
 
     new_rows = snap[~snap["account"].isin(already_today)]
     if new_rows.empty:

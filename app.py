@@ -952,6 +952,15 @@ def page_history() -> None:
     # ── record today manually if needed ──────────────────────────────────────
     _snapshot_button()
 
+    # ── validate structure ────────────────────────────────────────────────────
+    if "snapshot_date" not in df_snap.columns:
+        st.error(
+            "גיליון ה-snapshots אינו תקין (חסרה עמודת snapshot_date).\n"
+            "לחץ על 📸 צלם תמונת מצב היום כדי לאתחל מחדש."
+        )
+        _snapshot_button()
+        return
+
     # ── parse & validate dates ────────────────────────────────────────────────
     df_snap["snapshot_date"] = pd.to_datetime(df_snap["snapshot_date"], errors="coerce")
     df_snap = df_snap.dropna(subset=["snapshot_date"])
