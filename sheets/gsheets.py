@@ -99,10 +99,10 @@ def read_snapshots(worksheet_name: str = "snapshots") -> pd.DataFrame:
     """Load full portfolio history from the snapshots sheet."""
     try:
         ws = _open_sheet(worksheet_name)
-        rows = ws.get_all_values()
-        if len(rows) < 2:
+        records = ws.get_all_records()
+        if not records:
             return pd.DataFrame()
-        df = pd.DataFrame(rows[1:], columns=rows[0])
+        df = pd.DataFrame(records)
         for col in ("market_value", "cost_basis", "gain_loss", "gain_pct"):
             if col in df.columns:
                 df[col] = pd.to_numeric(
