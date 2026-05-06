@@ -1139,7 +1139,50 @@ def page_history() -> None:
     )
     st.plotly_chart(fig_type, use_container_width=True)
 
-    # ── Chart 4: gain/loss over time ──────────────────────────────────────────
+    # ── Chart 4: per holding over time ───────────────────────────────────────
+    section_header("שווי אחזקות לאורך זמן")
+
+    daily_holding = (
+        df_f.groupby(["snapshot_date", "asset_name"])["market_value"]
+        .sum()
+        .reset_index()
+        .sort_values("snapshot_date")
+    )
+
+    latest_date = daily_holding["snapshot_date"].max()
+    top_names = (
+        daily_holding[daily_holding["snapshot_date"] == latest_date]
+        .nlargest(20, "market_value")["asset_name"]
+        .tolist()
+    )
+    total_holdings = daily_holding["asset_name"].nunique()
+    dh_top = daily_holding[daily_holding["asset_name"].isin(top_names)]
+
+    if total_holdings > 20:
+        st.caption(f"מוצגות 20 האחזקות הגדולות מתוך {total_holdings}")
+
+    fig_hold = go.Figure()
+    for i, name in enumerate(sorted(top_names)):
+        sub = dh_top[dh_top["asset_name"] == name]
+        fig_hold.add_trace(go.Scatter(
+            x=sub["snapshot_date"],
+            y=sub["market_value"],
+            name=name,
+            line=dict(color=PALETTE[i % len(PALETTE)], width=2),
+            mode="lines+markers",
+            marker=dict(size=5),
+            hovertemplate=f"<b>{name}</b><br>%{{x|%d/%m/%Y}}<br>₪%{{y:,.0f}}<extra></extra>",
+        ))
+    fig_hold.update_layout(
+        **PLOTLY_LAYOUT,
+        height=380,
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="%d/%m/%y"),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f"),
+        legend=dict(orientation="h", x=0, y=1.15, font_size=10, traceorder="normal"),
+    )
+    st.plotly_chart(fig_hold, use_container_width=True)
+
+    # ── Chart 5: gain/loss over time ──────────────────────────────────────────
     section_header("רווח / הפסד לא ממומש לאורך זמן")
 
     colors_gl = ["#059669" if v >= 0 else "#DC2626" for v in daily_total["gain_loss"]]
