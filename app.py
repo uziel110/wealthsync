@@ -1123,8 +1123,11 @@ def page_history() -> None:
             name=TYPE_HE.get(atype, atype),
             line=dict(color=color, width=2),
             stackgroup="one",
-            fillcolor=color.replace("#", "rgba(").rstrip(")") + ",0.6)"
-                if color.startswith("#") else color,
+            fillcolor=(
+                "rgba({},{},{},0.6)".format(
+                    int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+                ) if color.startswith("#") else color
+            ),
             hovertemplate=f"<b>{TYPE_HE.get(atype, atype)}</b><br>%{{x|%d/%m/%Y}}<br>₪%{{y:,.0f}}<extra></extra>",
         ))
     fig_type.update_layout(
