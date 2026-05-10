@@ -676,12 +676,12 @@ def page_dashboard() -> None:
             labels=sb_labels,
             parents=sb_parents_,
             values=sb_values,
-            marker=dict(colors=sb_colors, line=dict(color="#fff", width=1.5)),
+            marker=dict(colors=sb_colors, line=dict(color="#fff", width=2)),
             branchvalues="total",
             hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentRoot:.1%}<extra></extra>",
-            textfont=dict(size=12),
+            textfont=dict(size=13, color="#1E293B"),
             insidetextorientation="radial",
-            maxdepth=2,
+            maxdepth=1,
         ))
         fig_type.update_layout(**PLOTLY_LAYOUT, height=360)
         fig_type.update_layout(margin=dict(t=8, b=8, l=8, r=8))
@@ -692,26 +692,25 @@ def page_dashboard() -> None:
         by_acc = (
             df.groupby(["account", "asset_type"])["market_value"].sum()
             .reset_index()
+        )
+        acc_totals = (
+            by_acc.groupby("account")["market_value"].sum()
+            .reset_index()
             .sort_values("market_value", ascending=False)
         )
-        acc_totals = by_acc.groupby("account")["market_value"].sum().reset_index()
 
-        # Treemap: root → account → asset_type
-        tm_ids      = ["root"] \
-                      + acc_totals["account"].tolist() \
-                      + (by_acc["account"] + "‖" + by_acc["asset_type"]).tolist()
-        tm_labels   = ["סה״כ"] \
-                      + acc_totals["account"].tolist() \
-                      + by_acc["asset_type"].map(TYPE_HE).tolist()
-        tm_parents  = [""] \
-                      + ["root"] * len(acc_totals) \
-                      + by_acc["account"].tolist()
-        tm_values   = [0] \
-                      + acc_totals["market_value"].tolist() \
-                      + by_acc["market_value"].tolist()
-        tm_colors   = ["#FFFFFF"] \
-                      + [PALETTE[i % len(PALETTE)] for i in range(len(acc_totals))] \
-                      + [TYPE_COLORS.get(t, "#94A3B8") for t in by_acc["asset_type"]]
+        # Treemap without a root node — accounts at top level, asset_types as children
+        # branchvalues="total": account value = sum of its asset_type children (correct)
+        tm_ids     = acc_totals["account"].tolist() \
+                     + (by_acc["account"] + "||" + by_acc["asset_type"]).tolist()
+        tm_labels  = acc_totals["account"].tolist() \
+                     + by_acc["asset_type"].map(lambda t: TYPE_HE.get(t, t)).tolist()
+        tm_parents = [""] * len(acc_totals) \
+                     + by_acc["account"].tolist()
+        tm_values  = acc_totals["market_value"].tolist() \
+                     + by_acc["market_value"].tolist()
+        tm_colors  = [PALETTE[i % len(PALETTE)] for i in range(len(acc_totals))] \
+                     + [TYPE_COLORS.get(t, "#94A3B8") for t in by_acc["asset_type"]]
 
         fig_acc = go.Figure(go.Treemap(
             ids=tm_ids,
@@ -720,7 +719,7 @@ def page_dashboard() -> None:
             values=tm_values,
             marker=dict(colors=tm_colors, line=dict(color="#fff", width=2)),
             branchvalues="total",
-            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentRoot:.1%}<extra></extra>",
+            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentParent:.0%} מהחשבון · %{percentRoot:.0%} מהתיק<extra></extra>",
             textfont=dict(size=12),
             textinfo="label+percent root",
             maxdepth=2,
