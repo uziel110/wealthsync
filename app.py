@@ -753,7 +753,7 @@ def page_dashboard() -> None:
     st.plotly_chart(fig_stack, use_container_width=True)
 
     # ── Row 3: gain/loss per asset ────────────────────────────────────────────
-    gl_hdr_col, gl_toggle_col = st.columns([3, 1])
+    gl_hdr_col, gl_toggle_col, gl_vline_col = st.columns([3, 1, 1])
     with gl_hdr_col:
         section_header("רווח / הפסד לפי נייר ערך")
     with gl_toggle_col:
@@ -763,6 +763,8 @@ def page_dashboard() -> None:
             key="gl_display_mode",
             label_visibility="collapsed",
         )
+    with gl_vline_col:
+        show_vline = st.checkbox("קו סה״כ", value=True, key="gl_show_vline")
 
     df_gl = df.sort_values("gain_pct" if gl_mode == "%" else "gain_loss")
     gl_values = df_gl["gain_pct"].fillna(0) if gl_mode == "%" else df_gl["gain_loss"]
@@ -787,6 +789,10 @@ def page_dashboard() -> None:
     vline_label  = f"סה״כ: {vline_x:+.1f}%" if gl_mode == "%" else f"סה״כ: ₪{vline_x:+,.0f}"
     vline_color  = "#059669" if vline_x >= 0 else "#DC2626"
 
+    # max label length → left margin so names aren't clipped
+    max_name_len = df_gl["asset_name"].str.len().max() if not df_gl.empty else 10
+    left_margin  = max(80, min(int(max_name_len * 7.5), 280))
+
     fig_gl = go.Figure(go.Bar(
         x=gl_values,
         y=df_gl["asset_name"],
@@ -797,27 +803,29 @@ def page_dashboard() -> None:
         textfont_size=11,
         hovertemplate=hover_tmpl,
     ))
-    fig_gl.add_vline(
-        x=vline_x,
-        line=dict(color=vline_color, width=2, dash="dash"),
-        annotation_text=vline_label,
-        annotation_position="top",
-        annotation=dict(
-            font=dict(size=12, color=vline_color),
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor=vline_color,
-            borderwidth=1,
-        ),
-    )
+    if show_vline:
+        fig_gl.add_vline(
+            x=vline_x,
+            line=dict(color=vline_color, width=2, dash="dash"),
+            annotation_text=vline_label,
+            annotation_position="top",
+            annotation=dict(
+                font=dict(size=12, color=vline_color),
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor=vline_color,
+                borderwidth=1,
+            ),
+        )
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
-        height=max(320, len(df_gl) * 36),
+        height=max(360, len(df_gl) * 40),
+        margin=dict(t=24, b=24, l=left_margin, r=24),
         xaxis=dict(
             showgrid=True, gridcolor="#F1F5F9",
             zeroline=True, zerolinecolor="#94A3B8", zerolinewidth=1.5,
             tickformat=x_tickformat,
         ),
-        yaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=False, automargin=True),
     )
     st.plotly_chart(fig_gl, use_container_width=True)
 
