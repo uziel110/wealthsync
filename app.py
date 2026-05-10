@@ -753,24 +753,42 @@ def page_dashboard() -> None:
     st.plotly_chart(fig_stack, use_container_width=True)
 
     # ── Row 3: gain/loss per asset ────────────────────────────────────────────
-    section_header("רווח / הפסד לפי נייר ערך")
+    gl_hdr_col, gl_toggle_col = st.columns([3, 1])
+    with gl_hdr_col:
+        section_header("רווח / הפסד לפי נייר ערך")
+    with gl_toggle_col:
+        gl_mode = st.radio(
+            "תצוגה", ["₪", "%"],
+            horizontal=True,
+            key="gl_display_mode",
+            label_visibility="collapsed",
+        )
 
-    df_gl = df.sort_values("gain_loss")
+    df_gl = df.sort_values("gain_pct" if gl_mode == "%" else "gain_loss")
+    gl_values = df_gl["gain_pct"].fillna(0) if gl_mode == "%" else df_gl["gain_loss"]
     colors_gl = [TYPE_COLORS.get(t, "#94A3B8") if v >= 0 else "#EF4444"
-                 for v, t in zip(df_gl["gain_loss"], df_gl["asset_type"])]
+                 for v, t in zip(gl_values, df_gl["asset_type"])]
+
+    if gl_mode == "%":
+        bar_text = [f"{p:+.1f}%  (₪{v:,.0f})"
+                    for p, v in zip(df_gl["gain_pct"].fillna(0), df_gl["gain_loss"])]
+        hover_tmpl = "<b>%{y}</b><br>%{x:+.1f}%<extra></extra>"
+        x_tickformat = "+.1f%"
+    else:
+        bar_text = [f"₪{v:,.0f}  ({p:+.1f}%)"
+                    for v, p in zip(df_gl["gain_loss"], df_gl["gain_pct"].fillna(0))]
+        hover_tmpl = "<b>%{y}</b><br>₪%{x:,.0f}<extra></extra>"
+        x_tickformat = "₪,.0f"
 
     fig_gl = go.Figure(go.Bar(
-        x=df_gl["gain_loss"],
+        x=gl_values,
         y=df_gl["asset_name"],
         orientation="h",
         marker_color=colors_gl,
-        text=[
-            f"₪{v:,.0f}  ({p:+.1f}%)"
-            for v, p in zip(df_gl["gain_loss"], df_gl["gain_pct"].fillna(0))
-        ],
+        text=bar_text,
         textposition="auto",
         textfont_size=11,
-        hovertemplate="<b>%{y}</b><br>₪%{x:,.0f}<extra></extra>",
+        hovertemplate=hover_tmpl,
     ))
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
@@ -778,7 +796,7 @@ def page_dashboard() -> None:
         xaxis=dict(
             showgrid=True, gridcolor="#F1F5F9",
             zeroline=True, zerolinecolor="#94A3B8", zerolinewidth=1.5,
-            tickformat="₪,.0f",
+            tickformat=x_tickformat,
         ),
         yaxis=dict(showgrid=False),
     )
@@ -1344,39 +1362,81 @@ def _manual_entry_securities(
     account_name = st.text_input("שם החשבון", value=account_name_default,
                                  key=f"{form_key}_acc_manual")
 
-    # show existing rows for this account so user can see what's already entered
     existing_all = st.session_state.holdings
     existing_acc = (
         existing_all[existing_all["account"] == account_name]
         if not existing_all.empty else pd.DataFrame()
     )
-    if not existing_acc.empty:
-        st.caption(f"ניירות קיימים בחשבון {account_name}:")
-        show_cols = ["asset_name", "asset_id", "cost_basis", "market_value"]
-        st.dataframe(
-            _display(existing_acc, [c for c in show_cols if c in existing_acc.columns])
-            .style.format({
-                "עלות (₪)": "₪{:,.2f}", "שווי נוכחי (₪)": "₪{:,.2f}",
-            }),
-            use_container_width=True, height=min(200, len(existing_acc) * 35 + 38),
-            hide_index=True,
-        )
+
+    # ── mode toggle ────────────────────────────────────────────────────────────
+    entry_mode = st.radio(
+        "פעולה",
+        ["➕ הוספה", "✏️ עדכון"],
+        horizontal=True,
+        key=f"{form_key}_entry_mode",
+    )
+    is_update = entry_mode == "✏️ עדכון"
+
+    # defaults for the form
+    default_name = default_id = ""
+    default_qty = default_cost = default_mv = 0.0
+    selected_idx = None  # index in existing_acc of the row being edited
+
+    if is_update:
+        if existing_acc.empty:
+            st.info("אין ניירות ערך קיימים בחשבון זה לעדכון.")
+            return
+
+        # build label list for selector
+        labels = [
+            f"{row['asset_name']}  ({row.get('asset_id', '')})"
+            for _, row in existing_acc.iterrows()
+        ]
+        chosen_label = st.selectbox("בחר נייר לעדכון", labels, key=f"{form_key}_sel_asset")
+        selected_idx = labels.index(chosen_label)
+        sel_row = existing_acc.iloc[selected_idx]
+        default_name = sel_row.get("asset_name", "")
+        default_id   = str(sel_row.get("asset_id", ""))
+        default_qty  = float(sel_row.get("quantity", 0.0))
+        default_cost = float(sel_row.get("cost_basis", 0.0))
+        default_mv   = float(sel_row.get("market_value", 0.0))
+    else:
+        # show existing rows so user can see what's already there
+        if not existing_acc.empty:
+            st.caption(f"ניירות קיימים בחשבון {account_name}:")
+            show_cols = ["asset_name", "asset_id", "cost_basis", "market_value"]
+            st.dataframe(
+                _display(existing_acc, [c for c in show_cols if c in existing_acc.columns])
+                .style.format({
+                    "עלות (₪)": "₪{:,.2f}", "שווי נוכחי (₪)": "₪{:,.2f}",
+                }),
+                use_container_width=True, height=min(200, len(existing_acc) * 35 + 38),
+                hide_index=True,
+            )
 
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
-    with st.form(f"{form_key}_manual_form", clear_on_submit=True):
+    submit_label = "💾 עדכן נייר" if is_update else "➕ הוסף נייר לתיק"
+    with st.form(f"{form_key}_manual_form", clear_on_submit=not is_update):
         c1, c2 = st.columns(2)
         with c1:
-            asset_name = st.text_input("שם הנייר", placeholder="לדוגמה: מניות אפל / קרן מחקה ת\"א 125")
-            asset_id   = st.text_input("מספר נייר / סימבול", placeholder="לדוגמה: 662577 / AAPL")
-            quantity   = st.number_input("כמות", min_value=0.0, step=1.0, format="%.4f")
+            asset_name = st.text_input("שם הנייר",
+                                       value=default_name,
+                                       placeholder="לדוגמה: מניות אפל / קרן מחקה ת\"א 125")
+            asset_id   = st.text_input("מספר נייר / סימבול",
+                                       value=default_id,
+                                       placeholder="לדוגמה: 662577 / AAPL")
+            quantity   = st.number_input("כמות", value=default_qty,
+                                         min_value=0.0, step=1.0, format="%.4f")
         with c2:
-            cost_basis   = st.number_input("עלות רכישה (₪)", min_value=0.0, step=100.0,
+            cost_basis   = st.number_input("עלות רכישה (₪)", value=default_cost,
+                                           min_value=0.0, step=100.0,
                                            help="סך הכסף ששולם בעת הרכישה")
-            market_value = st.number_input("שווי נוכחי (₪)", min_value=0.0, step=100.0,
+            market_value = st.number_input("שווי נוכחי (₪)", value=default_mv,
+                                           min_value=0.0, step=100.0,
                                            help="שווי השוק היום")
 
-        submitted = st.form_submit_button("➕ הוסף נייר לתיק", type="primary", use_container_width=True)
+        submitted = st.form_submit_button(submit_label, type="primary", use_container_width=True)
 
     if submitted and asset_name.strip():
         row = pd.DataFrame([{
@@ -1390,8 +1450,16 @@ def _manual_entry_securities(
         }])
         existing_other = existing_all[existing_all["account"] != account_name] \
             if not existing_all.empty else pd.DataFrame()
-        _save_holdings(pd.concat([existing_other, existing_acc, row], ignore_index=True))
-        st.success(f"✓ **{asset_name}** נוסף לחשבון {account_name}.")
+
+        if is_update and selected_idx is not None:
+            # replace only the selected row; keep the rest of the account's holdings
+            acc_without_selected = existing_acc.drop(existing_acc.index[selected_idx])
+            new_acc = pd.concat([acc_without_selected, row], ignore_index=True)
+            _save_holdings(pd.concat([existing_other, new_acc], ignore_index=True))
+            st.success(f"✓ **{asset_name}** עודכן בחשבון {account_name}.")
+        else:
+            _save_holdings(pd.concat([existing_other, existing_acc, row], ignore_index=True))
+            st.success(f"✓ **{asset_name}** נוסף לחשבון {account_name}.")
         st.rerun()
     elif submitted:
         st.warning("נא להזין שם נייר.")
