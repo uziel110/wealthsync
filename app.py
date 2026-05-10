@@ -780,6 +780,13 @@ def page_dashboard() -> None:
         hover_tmpl = "<b>%{y}</b><br>₪%{x:,.0f}<extra></extra>"
         x_tickformat = "₪,.0f"
 
+    total_gl     = df["gain_loss"].sum()
+    total_cost   = df["cost_basis"].sum()
+    total_gl_pct = (total_gl / total_cost * 100) if total_cost else 0
+    vline_x      = total_gl_pct if gl_mode == "%" else total_gl
+    vline_label  = f"סה״כ: {vline_x:+.1f}%" if gl_mode == "%" else f"סה״כ: ₪{vline_x:+,.0f}"
+    vline_color  = "#059669" if vline_x >= 0 else "#DC2626"
+
     fig_gl = go.Figure(go.Bar(
         x=gl_values,
         y=df_gl["asset_name"],
@@ -790,6 +797,18 @@ def page_dashboard() -> None:
         textfont_size=11,
         hovertemplate=hover_tmpl,
     ))
+    fig_gl.add_vline(
+        x=vline_x,
+        line=dict(color=vline_color, width=2, dash="dash"),
+        annotation_text=vline_label,
+        annotation_position="top",
+        annotation=dict(
+            font=dict(size=12, color=vline_color),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor=vline_color,
+            borderwidth=1,
+        ),
+    )
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
         height=max(320, len(df_gl) * 36),
