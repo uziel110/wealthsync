@@ -1300,8 +1300,7 @@ def page_upload() -> None:
 
     source = st.selectbox(
         "בחר מקור נתונים",
-        ["IBI", "פסגות", "בנק הפועלים", "לאומי טרייד",
-         "גמל להשקעה הראל — PDF", "הראל / גמל — הזנה ידנית"],
+        ["IBI", "פסגות", "בנק הפועלים", "לאומי טרייד", "הראל — גמל להשקעה"],
     )
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
@@ -1318,10 +1317,8 @@ def page_upload() -> None:
         )
     elif source == "לאומי טרייד":
         _leumi_upload_or_manual()
-    elif source == "גמל להשקעה הראל — PDF":
-        _upload_gamel_pdf()
-    elif source == "הראל / גמל — הזנה ידנית":
-        _manual_entry_harel()
+    elif source == "הראל — גמל להשקעה":
+        _upload_or_manual_harel()
 
 
 def _leumi_upload_or_manual() -> None:
@@ -1726,92 +1723,93 @@ def _upload_ibi(broker: str = "פסגות") -> None:
         st.success(f"✓ חשבון **{account_name}** סונכרן ונשמר.")
 
 
-def _upload_gamel_pdf() -> None:
-    section_header("קופת גמל להשקעה — העלאת PDF מהראל")
+def _upload_or_manual_harel() -> None:
+    section_header("הראל — גמל להשקעה")
 
-    st.markdown("""
-    <div class="ws-card" style="margin-bottom:1rem;">
-      <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
-        הורד את דוח <strong>מידע אישי — תכנית גמל להשקעה</strong> מאתר הראל ביטוח ופיננסים<br>
-        ← <strong>אזור אישי ← גמל להשקעה ← הדפסת דוח</strong><br>
-        ניתן להעלות <strong>מספר תכניות בו-זמנית</strong> — כל קובץ יישמר כחשבון נפרד.
-      </div>
-    </div>""", unsafe_allow_html=True)
+    tab_pdf, tab_manual = st.tabs(["📂 העלאת PDF", "✏️ הזנה ידנית"])
 
-    account_prefix = st.text_input("קידומת שם חשבון", value="גמל הראל",
-                                   help="שם הבסיס — המסלול יתווסף אוטומטית לכל קובץ.")
-    uploaded_files = st.file_uploader(
-        "גרור לכאן קבצי PDF או לחץ לבחירה",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key="upload_gamel_pdf",
-    )
+    with tab_pdf:
+        st.markdown("""
+        <div class="ws-card" style="margin-bottom:1rem;">
+          <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
+            הורד את דוח <strong>מידע אישי — תכנית גמל להשקעה</strong> מאתר הראל ביטוח ופיננסים<br>
+            ← <strong>אזור אישי ← גמל להשקעה ← הדפסת דוח</strong><br>
+            ניתן להעלות <strong>מספר מסלולים בבת אחת</strong> — כולם ישמרו תחת אותו חשבון.
+          </div>
+        </div>""", unsafe_allow_html=True)
 
-    if not uploaded_files:
-        return
+        account_name = st.text_input("שם החשבון", value="הראל",
+                                     help="כל המסלולים שמועלים יישמרו תחת שם זה.",
+                                     key="harel_acc_pdf")
+        uploaded_files = st.file_uploader(
+            "גרור לכאן קבצי PDF או לחץ לבחירה",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="upload_gamel_pdf",
+        )
 
-    all_dfs: list[pd.DataFrame] = []
-    errors: list[str] = []
+        if not uploaded_files:
+            return
 
-    with st.spinner(f"מנתח {len(uploaded_files)} קבצים…"):
-        for f in uploaded_files:
-            try:
-                # Parse with a temp name; we'll rename by track below
-                df_raw = parse_gamel_pdf(io.BytesIO(f.read()), account_name=account_prefix)
-                df_raw = enrich(df_raw)
-                # Give each track a unique account name: "קידומת — מסלול"
-                # asset_name is "גמל להשקעה — {track}", extract just the track part
-                def _make_account(asset_name: str) -> str:
-                    suffix = asset_name.split("—", 1)[-1].strip() if "—" in asset_name else asset_name
-                    return f"{account_prefix} — {suffix}"
-                df_raw["account"] = df_raw["asset_name"].apply(_make_account)
-                all_dfs.append(df_raw)
-            except Exception as exc:
-                errors.append(f"{f.name}: {exc}")
+        all_dfs: list[pd.DataFrame] = []
+        errors: list[str] = []
 
-    for err in errors:
-        st.error(f"שגיאה בפענוח: {err}")
+        with st.spinner(f"מנתח {len(uploaded_files)} קבצים…"):
+            for f in uploaded_files:
+                try:
+                    df_raw = parse_gamel_pdf(io.BytesIO(f.read()), account_name=account_name)
+                    df_raw = enrich(df_raw)
+                    all_dfs.append(df_raw)
+                except Exception as exc:
+                    errors.append(f"{f.name}: {exc}")
 
-    if not all_dfs:
-        return
+        for err in errors:
+            st.error(f"שגיאה בפענוח: {err}")
 
-    df = pd.concat(all_dfs, ignore_index=True)
+        if not all_dfs:
+            return
 
-    total_val  = df["market_value"].sum()
-    total_cost = df["cost_basis"].sum()
-    gain       = total_val - total_cost
+        df = pd.concat(all_dfs, ignore_index=True)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("תכניות שזוהו",   len(uploaded_files) - len(errors))
-    m2.metric("צבירה כוללת",    f"₪{total_val:,.0f}")
-    m3.metric("עלות רכישה",     f"₪{total_cost:,.0f}")
-    m4.metric("רווח לא ממומש",  f"₪{gain:,.0f}",
-              f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
+        total_val  = df["market_value"].sum()
+        total_cost = df["cost_basis"].sum()
+        gain       = total_val - total_cost
 
-    show_cols = ["account", "asset_name", "cost_basis", "market_value"]
-    st.dataframe(
-        _display(df, show_cols).style.format({
-            "עלות (₪)":       "₪{:,.2f}",
-            "שווי נוכחי (₪)": "₪{:,.2f}",
-        }),
-        use_container_width=True,
-    )
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("תכניות שזוהו",   len(uploaded_files) - len(errors))
+        m2.metric("צבירה כוללת",    f"₪{total_val:,.0f}")
+        m3.metric("עלות רכישה",     f"₪{total_cost:,.0f}")
+        m4.metric("רווח לא ממומש",  f"₪{gain:,.0f}",
+                  f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
 
-    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
-    if st.button("✅ הוסף לתיק ושמור", type="primary", key="save_gamel_pdf"):
-        existing = st.session_state.holdings
-        new_accounts = df["account"].unique()
-        if not existing.empty:
-            # Remove all accounts that are about to be replaced
-            existing = existing[~existing["account"].isin(new_accounts)]
-        _save_holdings(pd.concat([existing, df], ignore_index=True))
-        names = ", ".join(f"**{a}**" for a in new_accounts)
-        st.success(f"✓ נשמרו: {names}")
+        show_cols = ["asset_name", "cost_basis", "market_value"]
+        with st.expander("📋 כל הנתונים מהקובץ", expanded=False):
+            st.dataframe(
+                _display(df, show_cols).style.format({
+                    "עלות (₪)":       "₪{:,.2f}",
+                    "שווי נוכחי (₪)": "₪{:,.2f}",
+                }),
+                use_container_width=True,
+            )
 
+        existing_all = st.session_state.holdings
+        existing_acc = (
+            existing_all[existing_all["account"] == account_name]
+            if not existing_all.empty else pd.DataFrame()
+        )
+        st.markdown("---")
+        section_header("סנכרון עם התיק הקיים")
+        _show_upload_diff(existing_acc, df)
 
-def _manual_entry_harel() -> None:
-    section_header("פנסיה / גמל — הזנה ידנית")
-    _manual_entry_securities(account_name_default="הראל", source_tag="ידני", form_key="harel")
+        st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+        if st.button("✅ סנכרן ושמור", type="primary", key="save_gamel_pdf"):
+            existing_other = existing_all[existing_all["account"] != account_name] \
+                if not existing_all.empty else pd.DataFrame()
+            _save_holdings(pd.concat([existing_other, df], ignore_index=True))
+            st.success(f"✓ חשבון **{account_name}** סונכרן ונשמר.")
+
+    with tab_manual:
+        _manual_entry_securities(account_name_default="הראל", source_tag="ידני", form_key="harel")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
