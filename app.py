@@ -660,60 +660,78 @@ def page_dashboard() -> None:
 
     with col_l:
         section_header("הקצאה לפי סוג נכס")
-        by_type = (
-            df.groupby("asset_type")["market_value"].sum()
-            .reset_index()
-            .sort_values("market_value", ascending=False)
+        # Sunburst: inner ring = asset_type, outer ring = individual assets
+        sb_parents = (
+            df.groupby("asset_type")["market_value"].sum().reset_index()
         )
-        by_type["label"] = by_type["asset_type"].map(TYPE_HE)
-        by_type["color"] = by_type["asset_type"].map(TYPE_COLORS)
+        sb_ids      = [""] + sb_parents["asset_type"].tolist() + df["asset_name"].tolist()
+        sb_labels   = ["סה״כ"] + sb_parents["asset_type"].map(TYPE_HE).tolist() + df["asset_name"].tolist()
+        sb_parents_ = [""] + [""] * len(sb_parents) + df["asset_type"].tolist()
+        sb_values   = [0]  + sb_parents["market_value"].tolist() + df["market_value"].tolist()
+        sb_colors   = ["#FFFFFF"] + [TYPE_COLORS.get(t, "#94A3B8") for t in sb_parents["asset_type"]] \
+                      + [TYPE_COLORS.get(t, "#94A3B8") for t in df["asset_type"]]
 
-        fig_type = go.Figure(go.Pie(
-            labels=by_type["label"],
-            values=by_type["market_value"],
-            hole=0.52,
-            marker_colors=by_type["color"].tolist(),
-            textinfo="percent",
-            textposition="inside",
-            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percent}<extra></extra>",
+        fig_type = go.Figure(go.Sunburst(
+            ids=sb_ids,
+            labels=sb_labels,
+            parents=sb_parents_,
+            values=sb_values,
+            marker=dict(colors=sb_colors, line=dict(color="#fff", width=1.5)),
+            branchvalues="total",
+            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentRoot:.1%}<extra></extra>",
+            textfont=dict(size=12),
+            insidetextorientation="radial",
+            maxdepth=2,
         ))
         fig_type.update_layout(
             **PLOTLY_LAYOUT,
-            height=300,
-            showlegend=True,
-            legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12, font_size=11),
-            annotations=[dict(
-                text=f"₪{total/1e6:.1f}M" if total >= 1e6 else f"₪{total:,.0f}",
-                font_size=15, font_color="#1E293B", showarrow=False,
-            )],
+            height=360,
+            margin=dict(t=8, b=8, l=8, r=8),
         )
         st.plotly_chart(fig_type, use_container_width=True)
 
     with col_r:
         section_header("הקצאה לפי חשבון")
         by_acc = (
-            df.groupby("account")["market_value"].sum()
+            df.groupby(["account", "asset_type"])["market_value"].sum()
             .reset_index()
             .sort_values("market_value", ascending=False)
         )
-        fig_acc = go.Figure(go.Pie(
-            labels=by_acc["account"],
-            values=by_acc["market_value"],
-            hole=0.52,
-            marker_colors=PALETTE[:len(by_acc)],
-            textinfo="percent",
-            textposition="inside",
-            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percent}<extra></extra>",
+        acc_totals = by_acc.groupby("account")["market_value"].sum().reset_index()
+
+        # Treemap: root → account → asset_type
+        tm_ids      = ["root"] \
+                      + acc_totals["account"].tolist() \
+                      + (by_acc["account"] + "‖" + by_acc["asset_type"]).tolist()
+        tm_labels   = ["סה״כ"] \
+                      + acc_totals["account"].tolist() \
+                      + by_acc["asset_type"].map(TYPE_HE).tolist()
+        tm_parents  = [""] \
+                      + ["root"] * len(acc_totals) \
+                      + by_acc["account"].tolist()
+        tm_values   = [0] \
+                      + acc_totals["market_value"].tolist() \
+                      + by_acc["market_value"].tolist()
+        tm_colors   = ["#FFFFFF"] \
+                      + [PALETTE[i % len(PALETTE)] for i in range(len(acc_totals))] \
+                      + [TYPE_COLORS.get(t, "#94A3B8") for t in by_acc["asset_type"]]
+
+        fig_acc = go.Figure(go.Treemap(
+            ids=tm_ids,
+            labels=tm_labels,
+            parents=tm_parents,
+            values=tm_values,
+            marker=dict(colors=tm_colors, line=dict(color="#fff", width=2)),
+            branchvalues="total",
+            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentRoot:.1%}<extra></extra>",
+            textfont=dict(size=12),
+            textinfo="label+percent root",
+            maxdepth=2,
         ))
         fig_acc.update_layout(
             **PLOTLY_LAYOUT,
-            height=300,
-            showlegend=True,
-            legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12, font_size=11),
-            annotations=[dict(
-                text=f"{df['account'].nunique()} חשבונות",
-                font_size=13, font_color="#64748B", showarrow=False,
-            )],
+            height=360,
+            margin=dict(t=8, b=8, l=8, r=8),
         )
         st.plotly_chart(fig_acc, use_container_width=True)
 
