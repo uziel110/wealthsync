@@ -685,32 +685,95 @@ def page_dashboard() -> None:
 
     with col_l:
         section_header("הקצאה לפי סוג נכס")
-        # Sunburst: inner ring = asset_type, outer ring = individual assets
-        sb_parents = (
-            df.groupby("asset_type")["market_value"].sum().reset_index()
-        )
-        sb_ids      = [""] + sb_parents["asset_type"].tolist() + df["asset_name"].tolist()
-        sb_labels   = ["סה״כ"] + sb_parents["asset_type"].map(TYPE_HE).tolist() + df["asset_name"].tolist()
-        sb_parents_ = [""] + [""] * len(sb_parents) + df["asset_type"].tolist()
-        sb_values   = [0]  + sb_parents["market_value"].tolist() + df["market_value"].tolist()
-        sb_colors   = ["#FFFFFF"] + [TYPE_COLORS.get(t, "#94A3B8") for t in sb_parents["asset_type"]] \
-                      + [TYPE_COLORS.get(t, "#94A3B8") for t in df["asset_type"]]
 
-        fig_type = go.Figure(go.Sunburst(
-            ids=sb_ids,
-            labels=sb_labels,
-            parents=sb_parents_,
-            values=sb_values,
-            marker=dict(colors=sb_colors, line=dict(color="#fff", width=2)),
-            branchvalues="total",
-            hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}<br>%{percentRoot:.1%}<extra></extra>",
-            textfont=dict(size=13, color="#1E293B"),
-            insidetextorientation="radial",
-            maxdepth=1,
-        ))
-        fig_type.update_layout(**PLOTLY_LAYOUT, height=360)
-        fig_type.update_layout(margin=dict(t=8, b=8, l=8, r=8))
-        st.plotly_chart(fig_type, use_container_width=True)
+        type_totals = (
+            df.groupby("asset_type")["market_value"].sum()
+            .reset_index().sort_values("market_value", ascending=False)
+        )
+        type_totals["label"] = type_totals["asset_type"].map(TYPE_HE)
+        type_totals["color"] = type_totals["asset_type"].map(
+            lambda t: TYPE_COLORS.get(t, "#94A3B8"))
+
+        drill_type = st.session_state.get("alloc_type_drill")
+
+        if drill_type is None:
+            # ── main view: asset types ────────────────────────────────────────
+            fig_type = go.Figure(go.Pie(
+                labels=type_totals["label"],
+                values=type_totals["market_value"],
+                hole=0.46,
+                marker=dict(colors=type_totals["color"].tolist(),
+                            line=dict(color="#fff", width=2.5)),
+                textinfo="label+percent",
+                textposition="inside",
+                insidetextorientation="radial",
+                hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}"
+                              "<br>%{percent}<extra></extra>",
+                direction="clockwise",
+            ))
+            center_txt = f"₪{total/1e6:.1f}M" if total >= 1e6 else f"₪{total:,.0f}"
+            fig_type.update_layout(**PLOTLY_LAYOUT, height=360, showlegend=False)
+            fig_type.update_layout(
+                margin=dict(t=8, b=8, l=8, r=8),
+                annotations=[dict(text=center_txt, font_size=14,
+                                  font_color="#1E293B", showarrow=False)],
+            )
+            event = st.plotly_chart(
+                fig_type, use_container_width=True,
+                on_select="rerun", key="alloc_type_main",
+            )
+            if event and event.selection and event.selection.points:
+                clicked = event.selection.points[0].get("label", "")
+                rev_he = {v: k for k, v in TYPE_HE.items()}
+                clicked_key = rev_he.get(clicked)
+                if clicked_key:
+                    st.session_state["alloc_type_drill"] = clicked_key
+                    st.rerun()
+            st.caption("לחץ על פרוסה לצפייה בניירות הבודדים")
+
+        else:
+            # ── drill-down: individual assets within selected type ────────────
+            type_label = TYPE_HE.get(drill_type, drill_type)
+            base_color = TYPE_COLORS.get(drill_type, "#94A3B8")
+            r, g, b = (int(base_color[i:i+2], 16) for i in (1, 3, 5))
+
+            subset = (df[df["asset_type"] == drill_type]
+                      .groupby("asset_name")["market_value"].sum()
+                      .reset_index().sort_values("market_value", ascending=False))
+            n = len(subset)
+            drill_colors = [
+                f"rgba({r},{g},{b},{0.45 + 0.55*(n-i)/max(n-1,1):.2f})"
+                for i in range(n)
+            ]
+
+            if st.button("← חזור לסוגי נכסים", key="alloc_type_back"):
+                st.session_state["alloc_type_drill"] = None
+                st.rerun()
+
+            fig_drill = go.Figure(go.Pie(
+                labels=subset["asset_name"],
+                values=subset["market_value"],
+                hole=0.46,
+                marker=dict(colors=drill_colors,
+                            line=dict(color="#fff", width=2)),
+                textinfo="label+percent",
+                textposition="inside",
+                insidetextorientation="radial",
+                hovertemplate="<b>%{label}</b><br>₪%{value:,.0f}"
+                              "<br>%{percent}<extra></extra>",
+            ))
+            type_total = subset["market_value"].sum()
+            center_txt = f"₪{type_total/1e6:.1f}M" if type_total >= 1e6 \
+                         else f"₪{type_total:,.0f}"
+            fig_drill.update_layout(**PLOTLY_LAYOUT, height=360, showlegend=False,
+                                    title=dict(text=type_label, x=0.5, font_size=14))
+            fig_drill.update_layout(
+                margin=dict(t=32, b=8, l=8, r=8),
+                annotations=[dict(text=center_txt, font_size=14,
+                                  font_color="#1E293B", showarrow=False)],
+            )
+            st.plotly_chart(fig_drill, use_container_width=True,
+                            key="alloc_type_drill_chart")
 
     with col_r:
         section_header("הקצאה לפי חשבון")
@@ -835,7 +898,8 @@ def page_dashboard() -> None:
         orientation="h",
         marker_color=colors_gl,
         text=bar_text,
-        textposition="auto",
+        textposition="outside",
+        cliponaxis=False,
         textfont_size=11,
         hovertemplate=hover_tmpl,
     ))
