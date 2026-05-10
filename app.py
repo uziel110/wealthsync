@@ -1078,8 +1078,9 @@ def page_dashboard() -> None:
         height=340,
         xaxis=dict(title="שנה", showgrid=True, gridcolor="#F1F5F9",
                    dtick=max(1, years // 10)),
-        yaxis=dict(title="שווי (₪)", showgrid=True, gridcolor="#F1F5F9",
-                   tickformat="₪,.0f"),
+        yaxis=dict(title=dict(text="שווי (₪)", standoff=12),
+                   showgrid=True, gridcolor="#F1F5F9",
+                   tickformat="₪,.0f", automargin=True),
         legend=dict(orientation="h", x=0, y=1.16, font_size=11),
     )
     st.plotly_chart(fig_proj, use_container_width=True)
