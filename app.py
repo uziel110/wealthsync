@@ -90,6 +90,8 @@ h2 { font-size: 1.35rem !important; margin-top: 1.5rem !important; }
   background: var(--surface); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 1.1rem 1.25rem !important;
   border: 1px solid var(--border);
+  min-height: 100px;
+  display: flex !important; flex-direction: column !important; justify-content: center !important;
 }
 [data-testid="stMetricLabel"] {
   direction: rtl !important; text-align: right !important;
@@ -594,9 +596,8 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
     type_opts  = sorted(df["asset_type"].unique().tolist())
     type_labels = {k: TYPE_HE.get(k, k) for k in type_opts}
 
-    with st.container():
-        st.markdown('<div class="ws-filter-bar">', unsafe_allow_html=True)
-        fc1, fc2 = st.columns([1, 1])
+    with st.container(border=True):
+        fc1, fc2 = st.columns(2)
         with fc1:
             sel_accounts = st.multiselect(
                 "סינון לפי חשבון",
@@ -611,7 +612,6 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
                 default=list(type_labels.values()),
                 key="filter_types",
             )
-        st.markdown('</div>', unsafe_allow_html=True)
 
     # reverse-map Hebrew labels → keys
     rev = {v: k for k, v in type_labels.items()}
