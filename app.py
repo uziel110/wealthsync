@@ -592,36 +592,61 @@ with st.sidebar:
 def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
     df = enrich(df)
 
-    accounts   = sorted(df["account"].unique().tolist())
-    type_opts  = sorted(df["asset_type"].unique().tolist())
+    accounts    = sorted(df["account"].unique().tolist())
+    type_opts   = sorted(df["asset_type"].unique().tolist())
     type_labels = {k: TYPE_HE.get(k, k) for k in type_opts}
+    type_he_list = list(type_labels.values())
 
     with st.container(border=True):
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            sel_accounts = st.multiselect(
-                "סינון לפי חשבון",
-                options=accounts,
-                default=accounts,
-                key="filter_accounts",
-            )
-        with fc2:
-            sel_types = st.multiselect(
-                "סינון לפי סוג נכס",
-                options=list(type_labels.values()),
-                default=list(type_labels.values()),
-                key="filter_types",
-            )
+        # ── accounts row ──────────────────────────────────────────────────────
+        la, ba1, ba2 = st.columns([2, 1, 1])
+        la.markdown("<div style='padding-top:.45rem;font-size:.8rem;font-weight:700;"
+                    "color:#64748B;text-transform:uppercase;letter-spacing:.05em'>"
+                    "סינון לפי חשבון</div>", unsafe_allow_html=True)
+        if ba1.button("בחר הכל", key="acc_all", use_container_width=True):
+            st.session_state["filter_accounts"] = accounts
+            st.rerun()
+        if ba2.button("בטל הכל", key="acc_none", use_container_width=True):
+            st.session_state["filter_accounts"] = []
+            st.rerun()
 
-    # reverse-map Hebrew labels → keys
+        sel_accounts = st.pills(
+            "חשבונות", accounts,
+            selection_mode="multi",
+            default=accounts,
+            key="filter_accounts",
+            label_visibility="collapsed",
+        ) or []
+
+        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
+
+        # ── asset-type row ────────────────────────────────────────────────────
+        lt, bt1, bt2 = st.columns([2, 1, 1])
+        lt.markdown("<div style='padding-top:.45rem;font-size:.8rem;font-weight:700;"
+                    "color:#64748B;text-transform:uppercase;letter-spacing:.05em'>"
+                    "סינון לפי סוג נכס</div>", unsafe_allow_html=True)
+        if bt1.button("בחר הכל", key="type_all", use_container_width=True):
+            st.session_state["filter_types"] = type_he_list
+            st.rerun()
+        if bt2.button("בטל הכל", key="type_none", use_container_width=True):
+            st.session_state["filter_types"] = []
+            st.rerun()
+
+        sel_types = st.pills(
+            "סוגי נכסים", type_he_list,
+            selection_mode="multi",
+            default=type_he_list,
+            key="filter_types",
+            label_visibility="collapsed",
+        ) or []
+
     rev = {v: k for k, v in type_labels.items()}
     sel_type_keys = [rev[l] for l in sel_types if l in rev]
 
-    filtered = df[
+    return df[
         df["account"].isin(sel_accounts) &
         df["asset_type"].isin(sel_type_keys)
     ]
-    return filtered
 
 
 # ═════════════════════════════════════════════════════════════════════════════
