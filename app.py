@@ -968,22 +968,13 @@ def page_history() -> None:
     if df_snap.empty:
         st.info(
             "עדיין אין נתוני היסטוריה.\n\n"
-            "תמונות מצב נשמרות אוטומטית בכל פעם שמעלים קובץ או מזינים נתונים. "
-            "לחץ על הכפתור למטה כדי לצלם את המצב הנוכחי."
+            "תמונות מצב נשמרות אוטומטית בכל פעם שמעלים קובץ או מזינים נתונים."
         )
-        _snapshot_button()
         return
-
-    # ── record today manually if needed ──────────────────────────────────────
-    _snapshot_button()
 
     # ── validate structure ────────────────────────────────────────────────────
     if "snapshot_date" not in df_snap.columns:
-        st.error(
-            "גיליון ה-snapshots אינו תקין (חסרה עמודת snapshot_date).\n"
-            "לחץ על 📸 צלם תמונת מצב היום כדי לאתחל מחדש."
-        )
-        _snapshot_button()
+        st.error("גיליון ה-snapshots אינו תקין (חסרה עמודת snapshot_date).")
         return
 
     # ── parse & validate dates ────────────────────────────────────────────────
@@ -1207,22 +1198,58 @@ def page_history() -> None:
     )
     st.plotly_chart(fig_hold, use_container_width=True)
 
-    # ── Chart 5: gain/loss over time ──────────────────────────────────────────
+    # ── Chart 5: gain/loss over time (filled area) ───────────────────────────
     section_header("רווח / הפסד לא ממומש לאורך זמן")
 
-    colors_gl = ["#059669" if v >= 0 else "#DC2626" for v in daily_total["gain_loss"]]
-    fig_gl = go.Figure(go.Bar(
+    gl_pos = daily_total["gain_loss"].clip(lower=0)
+    gl_neg = daily_total["gain_loss"].clip(upper=0)
+
+    fig_gl = go.Figure()
+    # positive area (above zero)
+    fig_gl.add_trace(go.Scatter(
+        x=daily_total["snapshot_date"],
+        y=gl_pos,
+        name="רווח",
+        mode="lines",
+        line=dict(color="#059669", width=0),
+        fill="tozeroy",
+        fillcolor="rgba(5,150,105,0.18)",
+        hoverinfo="skip",
+    ))
+    # negative area (below zero)
+    fig_gl.add_trace(go.Scatter(
+        x=daily_total["snapshot_date"],
+        y=gl_neg,
+        name="הפסד",
+        mode="lines",
+        line=dict(color="#DC2626", width=0),
+        fill="tozeroy",
+        fillcolor="rgba(220,38,38,0.18)",
+        hoverinfo="skip",
+    ))
+    # main line with dynamic color marker per point
+    last_gl = daily_total["gain_loss"].iloc[-1] if not daily_total.empty else 0
+    line_color = "#059669" if last_gl >= 0 else "#DC2626"
+    fig_gl.add_trace(go.Scatter(
         x=daily_total["snapshot_date"],
         y=daily_total["gain_loss"],
-        marker_color=colors_gl,
+        name="רווח/הפסד",
+        mode="lines+markers",
+        line=dict(color=line_color, width=2.5),
+        marker=dict(
+            size=7,
+            color=["#059669" if v >= 0 else "#DC2626" for v in daily_total["gain_loss"]],
+            line=dict(width=1.5, color="#fff"),
+        ),
         hovertemplate="%{x|%d/%m/%Y}<br>₪%{y:,.0f}<extra></extra>",
     ))
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
-        height=260,
-        xaxis=dict(showgrid=False, tickformat="%d/%m/%y"),
+        height=300,
+        showlegend=False,
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="%d/%m/%y"),
         yaxis=dict(showgrid=True, gridcolor="#F1F5F9", tickformat="₪,.0f",
-                   zeroline=True, zerolinecolor="#94A3B8"),
+                   zeroline=True, zerolinecolor="#94A3B8", zerolinewidth=1.5),
     )
     st.plotly_chart(fig_gl, use_container_width=True)
 
@@ -1244,21 +1271,6 @@ def page_history() -> None:
         )
 
 
-def _snapshot_button() -> None:
-    """Button to manually capture today's portfolio state as a snapshot."""
-    df_cur = st.session_state.holdings
-    if df_cur.empty:
-        return
-    c1, _ = st.columns([1, 4])
-    with c1:
-        if st.button("📸 צלם תמונת מצב היום", use_container_width=True):
-            try:
-                from sheets.gsheets import append_snapshot
-                append_snapshot(enrich(df_cur))
-                st.success("✓ תמונת מצב נשמרה.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"שגיאה: {exc}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
