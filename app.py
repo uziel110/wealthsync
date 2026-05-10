@@ -114,11 +114,37 @@ h2 { font-size: 1.35rem !important; margin-top: 1.5rem !important; }
 .stButton > button[kind="primary"]:hover {
   background: #1D4ED8 !important; box-shadow: 0 4px 12px rgba(37,99,235,.35) !important;
 }
+/* ── filter action buttons (בחר הכל / בטל הכל) ─────── */
+.ws-filter-btn .stButton > button {
+  min-height: 26px !important; height: 26px !important;
+  padding: 0 .65rem !important; font-size: .72rem !important;
+  border-radius: 999px !important; font-weight: 600 !important;
+  background: var(--surface) !important;
+  border: 1.5px solid var(--border) !important;
+  color: var(--muted) !important; box-shadow: none !important;
+  line-height: 1 !important;
+}
+.ws-filter-btn .stButton > button:hover {
+  border-color: var(--primary) !important; color: var(--primary) !important;
+  background: var(--primary-lt) !important;
+}
+
+/* ─── Global RTL text ────────────────────────────────── */
+p, li, span, label, caption, small,
+[data-testid="stText"], [data-testid="stCaptionContainer"],
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stExpander"] summary,
+[data-testid="stCheckbox"] label,
+[data-testid="stRadio"] label,
+[data-testid="stWidgetLabel"],
+.stSuccess p, .stError p, .stWarning p, .stInfo p {
+  direction: rtl !important; text-align: right !important;
+}
 
 /* ─── Inputs ─────────────────────────────────────────── */
 .stTextInput label, .stNumberInput label, .stSelectbox label,
 .stFileUploader label, .stSlider label, .stRadio > label,
-.stForm label, .stMultiSelect label, p {
+.stForm label, .stMultiSelect label {
   direction: rtl !important; text-align: right !important;
 }
 .stTextInput input, .stNumberInput input {
@@ -599,46 +625,50 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
 
     with st.container(border=True):
         # ── accounts row ──────────────────────────────────────────────────────
-        la, ba1, ba2 = st.columns([2, 1, 1])
-        la.markdown("<div style='padding-top:.45rem;font-size:.8rem;font-weight:700;"
-                    "color:#64748B;text-transform:uppercase;letter-spacing:.05em'>"
-                    "סינון לפי חשבון</div>", unsafe_allow_html=True)
-        if ba1.button("בחר הכל", key="acc_all", use_container_width=True):
-            st.session_state["filter_accounts"] = accounts
-            st.rerun()
-        if ba2.button("בטל הכל", key="acc_none", use_container_width=True):
-            st.session_state["filter_accounts"] = []
-            st.rerun()
+        st.markdown(
+            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
+            "text-transform:uppercase;letter-spacing:.05em;"
+            "margin-bottom:.3rem;text-align:right'>חשבון</div>",
+            unsafe_allow_html=True,
+        )
+        pills_col, btns_col = st.columns([5, 1])
+        with pills_col:
+            sel_accounts = st.pills(
+                "חשבונות", accounts, selection_mode="multi",
+                default=accounts, key="filter_accounts",
+                label_visibility="collapsed",
+            ) or []
+        with btns_col:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
+            if st.button("הכל ✓", key="acc_all"):
+                st.session_state["filter_accounts"] = accounts; st.rerun()
+            if st.button("נקה ✗", key="acc_none"):
+                st.session_state["filter_accounts"] = []; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        sel_accounts = st.pills(
-            "חשבונות", accounts,
-            selection_mode="multi",
-            default=accounts,
-            key="filter_accounts",
-            label_visibility="collapsed",
-        ) or []
-
-        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
 
         # ── asset-type row ────────────────────────────────────────────────────
-        lt, bt1, bt2 = st.columns([2, 1, 1])
-        lt.markdown("<div style='padding-top:.45rem;font-size:.8rem;font-weight:700;"
-                    "color:#64748B;text-transform:uppercase;letter-spacing:.05em'>"
-                    "סינון לפי סוג נכס</div>", unsafe_allow_html=True)
-        if bt1.button("בחר הכל", key="type_all", use_container_width=True):
-            st.session_state["filter_types"] = type_he_list
-            st.rerun()
-        if bt2.button("בטל הכל", key="type_none", use_container_width=True):
-            st.session_state["filter_types"] = []
-            st.rerun()
-
-        sel_types = st.pills(
-            "סוגי נכסים", type_he_list,
-            selection_mode="multi",
-            default=type_he_list,
-            key="filter_types",
-            label_visibility="collapsed",
-        ) or []
+        st.markdown(
+            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
+            "text-transform:uppercase;letter-spacing:.05em;"
+            "margin-bottom:.3rem;text-align:right'>סוג נכס</div>",
+            unsafe_allow_html=True,
+        )
+        pills_col2, btns_col2 = st.columns([5, 1])
+        with pills_col2:
+            sel_types = st.pills(
+                "סוגי נכסים", type_he_list, selection_mode="multi",
+                default=type_he_list, key="filter_types",
+                label_visibility="collapsed",
+            ) or []
+        with btns_col2:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
+            if st.button("הכל ✓", key="type_all"):
+                st.session_state["filter_types"] = type_he_list; st.rerun()
+            if st.button("נקה ✗", key="type_none"):
+                st.session_state["filter_types"] = []; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     rev = {v: k for k, v in type_labels.items()}
     sel_type_keys = [rev[l] for l in sel_types if l in rev]
@@ -1112,34 +1142,71 @@ def page_history() -> None:
         return
 
     # ── filter bar ────────────────────────────────────────────────────────────
-    section_header("סינון")
-    fc1, fc2, fc3 = st.columns(3)
-
     all_accounts = sorted(df_snap["account"].dropna().unique().tolist())
     all_types    = sorted(df_snap["asset_type"].dropna().unique().tolist())
+    type_labels  = {k: TYPE_HE.get(k, k) for k in all_types}
+    type_he_hist = list(type_labels.values())
     date_min     = df_snap["snapshot_date"].min().date()
     date_max     = df_snap["snapshot_date"].max().date()
 
-    with fc1:
-        sel_accounts = st.multiselect("חשבון", all_accounts, default=all_accounts, key="hist_acc")
-    with fc2:
-        type_labels  = {k: TYPE_HE.get(k, k) for k in all_types}
-        sel_type_lbl = st.multiselect(
-            "סוג נכס",
-            list(type_labels.values()),
-            default=list(type_labels.values()),
-            key="hist_type",
-        )
-        rev = {v: k for k, v in type_labels.items()}
-        sel_types = [rev[l] for l in sel_type_lbl if l in rev]
-    with fc3:
+    with st.container(border=True):
+        # date range — full width
         date_range = st.date_input(
             "טווח תאריכים",
             value=(date_min, date_max),
-            min_value=date_min,
-            max_value=date_max,
+            min_value=date_min, max_value=date_max,
             key="hist_dates",
         )
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+
+        # accounts
+        st.markdown(
+            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
+            "text-transform:uppercase;letter-spacing:.05em;"
+            "margin-bottom:.3rem;text-align:right'>חשבון</div>",
+            unsafe_allow_html=True,
+        )
+        hpa, hba = st.columns([5, 1])
+        with hpa:
+            sel_accounts = st.pills(
+                "חשבונות", all_accounts, selection_mode="multi",
+                default=all_accounts, key="hist_acc",
+                label_visibility="collapsed",
+            ) or []
+        with hba:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
+            if st.button("הכל ✓", key="hist_acc_all"):
+                st.session_state["hist_acc"] = all_accounts; st.rerun()
+            if st.button("נקה ✗", key="hist_acc_none"):
+                st.session_state["hist_acc"] = []; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+
+        # asset types
+        st.markdown(
+            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
+            "text-transform:uppercase;letter-spacing:.05em;"
+            "margin-bottom:.3rem;text-align:right'>סוג נכס</div>",
+            unsafe_allow_html=True,
+        )
+        hpt, hbt = st.columns([5, 1])
+        with hpt:
+            sel_type_lbl = st.pills(
+                "סוגי נכסים", type_he_hist, selection_mode="multi",
+                default=type_he_hist, key="hist_type",
+                label_visibility="collapsed",
+            ) or []
+        with hbt:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
+            if st.button("הכל ✓", key="hist_type_all"):
+                st.session_state["hist_type"] = type_he_hist; st.rerun()
+            if st.button("נקה ✗", key="hist_type_none"):
+                st.session_state["hist_type"] = []; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    rev = {v: k for k, v in type_labels.items()}
+    sel_types = [rev[l] for l in sel_type_lbl if l in rev]
 
     d_from = pd.Timestamp(date_range[0] if isinstance(date_range, (list, tuple)) else date_range)
     d_to   = pd.Timestamp(date_range[1] if isinstance(date_range, (list, tuple)) and len(date_range) > 1 else date_max)
