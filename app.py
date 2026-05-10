@@ -683,11 +683,8 @@ def page_dashboard() -> None:
             insidetextorientation="radial",
             maxdepth=2,
         ))
-        fig_type.update_layout(
-            **PLOTLY_LAYOUT,
-            height=360,
-            margin=dict(t=8, b=8, l=8, r=8),
-        )
+        fig_type.update_layout(**PLOTLY_LAYOUT, height=360)
+        fig_type.update_layout(margin=dict(t=8, b=8, l=8, r=8))
         st.plotly_chart(fig_type, use_container_width=True)
 
     with col_r:
@@ -728,11 +725,8 @@ def page_dashboard() -> None:
             textinfo="label+percent root",
             maxdepth=2,
         ))
-        fig_acc.update_layout(
-            **PLOTLY_LAYOUT,
-            height=360,
-            margin=dict(t=8, b=8, l=8, r=8),
-        )
+        fig_acc.update_layout(**PLOTLY_LAYOUT, height=360)
+        fig_acc.update_layout(margin=dict(t=8, b=8, l=8, r=8))
         st.plotly_chart(fig_acc, use_container_width=True)
 
     # ── Row 2: bar by account (values) + breakdown by type within account ─────
@@ -837,7 +831,6 @@ def page_dashboard() -> None:
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
         height=max(360, len(df_gl) * 40),
-        margin=dict(t=24, b=24, l=left_margin, r=24),
         xaxis=dict(
             showgrid=True, gridcolor="#F1F5F9",
             zeroline=True, zerolinecolor="#94A3B8", zerolinewidth=1.5,
@@ -845,6 +838,7 @@ def page_dashboard() -> None:
         ),
         yaxis=dict(showgrid=False, automargin=True),
     )
+    fig_gl.update_layout(margin=dict(t=24, b=24, l=left_margin, r=24))
     st.plotly_chart(fig_gl, use_container_width=True)
 
     # ── Row 4: holdings table ─────────────────────────────────────────────────
