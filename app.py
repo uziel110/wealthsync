@@ -623,49 +623,48 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
     type_labels = {k: TYPE_HE.get(k, k) for k in type_opts}
     type_he_list = list(type_labels.values())
 
+    _LBL = (
+        "font-size:.75rem;font-weight:700;color:#64748B;"
+        "text-transform:uppercase;letter-spacing:.04em;"
+        "padding-top:.45rem;text-align:right"
+    )
     with st.container(border=True):
-        # ── accounts row ──────────────────────────────────────────────────────
-        st.markdown(
-            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
-            "text-transform:uppercase;letter-spacing:.05em;"
-            "margin-bottom:.3rem;text-align:right'>חשבון</div>",
-            unsafe_allow_html=True,
-        )
-        pills_col, btns_col = st.columns([5, 1])
-        with pills_col:
+        # ── accounts row: label | pills | הכל | נקה ──────────────────────────
+        lc, pc, ac, nc = st.columns([0.65, 5, 0.45, 0.45])
+        lc.markdown(f"<div style='{_LBL}'>חשבון</div>", unsafe_allow_html=True)
+        with pc:
             sel_accounts = st.pills(
                 "חשבונות", accounts, selection_mode="multi",
                 default=accounts, key="filter_accounts",
                 label_visibility="collapsed",
             ) or []
-        with btns_col:
+        with ac:
             st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="acc_all"):
                 st.session_state["filter_accounts"] = accounts; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with nc:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="acc_none"):
                 st.session_state["filter_accounts"] = []; st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
-
-        # ── asset-type row ────────────────────────────────────────────────────
-        st.markdown(
-            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
-            "text-transform:uppercase;letter-spacing:.05em;"
-            "margin-bottom:.3rem;text-align:right'>סוג נכס</div>",
-            unsafe_allow_html=True,
-        )
-        pills_col2, btns_col2 = st.columns([5, 1])
-        with pills_col2:
+        # ── asset-type row: label | pills | הכל | נקה ────────────────────────
+        lc2, pc2, ac2, nc2 = st.columns([0.65, 5, 0.45, 0.45])
+        lc2.markdown(f"<div style='{_LBL}'>סוג נכס</div>", unsafe_allow_html=True)
+        with pc2:
             sel_types = st.pills(
                 "סוגי נכסים", type_he_list, selection_mode="multi",
                 default=type_he_list, key="filter_types",
                 label_visibility="collapsed",
             ) or []
-        with btns_col2:
+        with ac2:
             st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="type_all"):
                 st.session_state["filter_types"] = type_he_list; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with nc2:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="type_none"):
                 st.session_state["filter_types"] = []; st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1158,50 +1157,48 @@ def page_history() -> None:
             min_value=date_min, max_value=date_max,
             key="hist_dates",
         )
-        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
-
-        # accounts
-        st.markdown(
-            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
-            "text-transform:uppercase;letter-spacing:.05em;"
-            "margin-bottom:.3rem;text-align:right'>חשבון</div>",
-            unsafe_allow_html=True,
+        _LBL_H = (
+            "font-size:.75rem;font-weight:700;color:#64748B;"
+            "text-transform:uppercase;letter-spacing:.04em;"
+            "padding-top:.45rem;text-align:right"
         )
-        hpa, hba = st.columns([5, 1])
+
+        # accounts: label | pills | הכל | נקה
+        hlc, hpa, haa, hna = st.columns([0.65, 5, 0.45, 0.45])
+        hlc.markdown(f"<div style='{_LBL_H}'>חשבון</div>", unsafe_allow_html=True)
         with hpa:
             sel_accounts = st.pills(
                 "חשבונות", all_accounts, selection_mode="multi",
                 default=all_accounts, key="hist_acc",
                 label_visibility="collapsed",
             ) or []
-        with hba:
+        with haa:
             st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="hist_acc_all"):
                 st.session_state["hist_acc"] = all_accounts; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with hna:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="hist_acc_none"):
                 st.session_state["hist_acc"] = []; st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
-
-        # asset types
-        st.markdown(
-            "<div style='font-size:.78rem;font-weight:700;color:#64748B;"
-            "text-transform:uppercase;letter-spacing:.05em;"
-            "margin-bottom:.3rem;text-align:right'>סוג נכס</div>",
-            unsafe_allow_html=True,
-        )
-        hpt, hbt = st.columns([5, 1])
+        # asset types: label | pills | הכל | נקה
+        htlc, hpt, hat, hnt = st.columns([0.65, 5, 0.45, 0.45])
+        htlc.markdown(f"<div style='{_LBL_H}'>סוג נכס</div>", unsafe_allow_html=True)
         with hpt:
             sel_type_lbl = st.pills(
                 "סוגי נכסים", type_he_hist, selection_mode="multi",
                 default=type_he_hist, key="hist_type",
                 label_visibility="collapsed",
             ) or []
-        with hbt:
+        with hat:
             st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="hist_type_all"):
                 st.session_state["hist_type"] = type_he_hist; st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with hnt:
+            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="hist_type_none"):
                 st.session_state["hist_type"] = []; st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
