@@ -788,19 +788,20 @@ def page_dashboard() -> None:
     vline_color  = "#059669" if vline_x >= 0 else "#DC2626"
 
     fig_gl = go.Figure(go.Bar(
-        x=df_gl["asset_name"],
-        y=gl_values,
+        x=gl_values,
+        y=df_gl["asset_name"],
+        orientation="h",
         marker_color=colors_gl,
         text=bar_text,
         textposition="auto",
         textfont_size=11,
         hovertemplate=hover_tmpl,
     ))
-    fig_gl.add_hline(
-        y=vline_x,
+    fig_gl.add_vline(
+        x=vline_x,
         line=dict(color=vline_color, width=2, dash="dash"),
         annotation_text=vline_label,
-        annotation_position="right",
+        annotation_position="top",
         annotation=dict(
             font=dict(size=12, color=vline_color),
             bgcolor="rgba(255,255,255,0.85)",
@@ -810,13 +811,13 @@ def page_dashboard() -> None:
     )
     fig_gl.update_layout(
         **PLOTLY_LAYOUT,
-        height=420,
-        xaxis=dict(showgrid=False, tickangle=-35),
-        yaxis=dict(
+        height=max(320, len(df_gl) * 36),
+        xaxis=dict(
             showgrid=True, gridcolor="#F1F5F9",
             zeroline=True, zerolinecolor="#94A3B8", zerolinewidth=1.5,
             tickformat=x_tickformat,
         ),
+        yaxis=dict(showgrid=False),
     )
     st.plotly_chart(fig_gl, use_container_width=True)
 
