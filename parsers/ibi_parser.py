@@ -93,9 +93,20 @@ def _find_header_row(df_raw: pd.DataFrame) -> int:
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def parse_ibi(file: "BytesIO | str", account_name: str = "פסגות") -> pd.DataFrame:
+def parse_ibi(
+    file: "BytesIO | str",
+    account_name: str = "פסגות",
+    source: str | None = None,
+) -> pd.DataFrame:
     """
     Parse a Psagot / IBI Excel export into a normalised holdings DataFrame.
+
+    Parameters
+    ----------
+    file        : path or BytesIO of the Excel file
+    account_name: display name stored in the 'account' column
+    source      : override the 'source' tag; auto-detected from format if None
+                  (Format A → "פסגות", Format B → "IBI")
 
     Returns
     -------
@@ -113,11 +124,13 @@ def parse_ibi(file: "BytesIO | str", account_name: str = "פסגות") -> pd.Dat
 
     if fmt == "A":
         df = _parse_format_a(df)
+        auto_source = "פסגות"
     else:
         df = _parse_format_b(df)
+        auto_source = "IBI"
 
     df.insert(0, "account", account_name)
-    df["source"] = "פסגות"
+    df["source"] = source if source is not None else auto_source
     return df.reset_index(drop=True)
 
 

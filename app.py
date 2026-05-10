@@ -1265,17 +1265,19 @@ def _snapshot_button() -> None:
 # דף: העלאה
 # ═════════════════════════════════════════════════════════════════════════════
 def page_upload() -> None:
-    page_header("📤", "העלאת קובץ החזקות", "פרסר אקסל אוטומטי · IBI/פסגות · הפועלים · לאומי טרייד · הזנה ידנית")
+    page_header("📤", "העלאת קובץ החזקות", "פרסר אקסל אוטומטי · IBI · פסגות · הפועלים · לאומי טרייד · הזנה ידנית")
 
     source = st.selectbox(
         "בחר מקור נתונים",
-        ["IBI / פסגות", "בנק הפועלים", "לאומי טרייד",
+        ["IBI", "פסגות", "בנק הפועלים", "לאומי טרייד",
          "גמל להשקעה הראל — PDF", "הראל / גמל — הזנה ידנית"],
     )
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
-    if source == "IBI / פסגות":
-        _upload_ibi()
+    if source == "IBI":
+        _upload_ibi(broker="IBI")
+    elif source == "פסגות":
+        _upload_ibi(broker="פסגות")
     elif source == "בנק הפועלים":
         _upload_generic(
             bank_name="בנק הפועלים",
@@ -1465,6 +1467,80 @@ def _manual_entry_securities(
         st.warning("נא להזין שם נייר.")
 
 
+# ── File-upload sync diff helper ──────────────────────────────────────────────
+
+def _show_upload_diff(existing_acc: pd.DataFrame, new_df: pd.DataFrame) -> None:
+    """
+    Display a before/after diff between existing account holdings and the
+    newly parsed file.  Match rows by asset_id when available, else asset_name.
+    """
+    def _key(row):
+        aid = str(row.get("asset_id", "")).strip()
+        return aid if aid and aid not in ("nan", "") else str(row.get("asset_name", "")).strip()
+
+    existing_map = {_key(r): r for _, r in existing_acc.iterrows()} if not existing_acc.empty else {}
+    new_map      = {_key(r): r for _, r in new_df.iterrows()}
+
+    added   = [k for k in new_map      if k not in existing_map]
+    removed = [k for k in existing_map if k not in new_map]
+    updated = []
+    for k in new_map:
+        if k not in existing_map:
+            continue
+        old, new = existing_map[k], new_map[k]
+        for col in ("quantity", "market_value", "cost_basis"):
+            if abs(float(old.get(col, 0) or 0) - float(new.get(col, 0) or 0)) > 0.01:
+                updated.append(k)
+                break
+
+    has_changes = added or removed or updated
+    if not has_changes and not existing_acc.empty:
+        st.success("✓ הקובץ זהה לחלוטין להחזקות הקיימות — אין שינויים.")
+        return
+
+    if existing_acc.empty:
+        st.info(f"חשבון חדש — {len(new_df)} ניירות ערך יתווספו.")
+        return
+
+    col_a, col_r, col_u = st.columns(3)
+    col_a.metric("➕ חדשים מהקובץ",   len(added))
+    col_r.metric("🗑️ יוסרו מהתיק",  len(removed))
+    col_u.metric("🔄 מתעדכנים",       len(updated))
+
+    if added:
+        with st.expander(f"➕ ניירות חדשים שיתווספו ({len(added)})"):
+            rows = [new_map[k] for k in added]
+            _diff_table(rows, ["asset_name", "asset_id", "quantity", "cost_basis", "market_value"])
+
+    if removed:
+        with st.expander(f"🗑️ ניירות שיוסרו מהתיק ({len(removed)})"):
+            rows = [existing_map[k] for k in removed]
+            _diff_table(rows, ["asset_name", "asset_id", "quantity", "cost_basis", "market_value"])
+
+    if updated:
+        with st.expander(f"🔄 ניירות שיתעדכנו ({len(updated)})"):
+            records = []
+            for k in updated:
+                old, new = existing_map[k], new_map[k]
+                records.append({
+                    "שם נייר":          new.get("asset_name", k),
+                    "כמות (ישן)":       old.get("quantity", ""),
+                    "כמות (חדש)":       new.get("quantity", ""),
+                    "שווי ישן (₪)":     old.get("market_value", ""),
+                    "שווי חדש (₪)":     new.get("market_value", ""),
+                })
+            st.dataframe(pd.DataFrame(records), use_container_width=True,
+                         hide_index=True)
+
+
+def _diff_table(rows: list, cols: list) -> None:
+    df = pd.DataFrame(rows)[cols]
+    df = _display(df, [c for c in cols if c in df.columns])
+    fmt = {"עלות (₪)": "₪{:,.2f}", "שווי נוכחי (₪)": "₪{:,.2f}", "כמות": "{:,.4f}"}
+    st.dataframe(df.style.format({k: v for k, v in fmt.items() if k in df.columns}),
+                 use_container_width=True, hide_index=True)
+
+
 def _upload_generic(
     bank_name: str,
     default_account: str,
@@ -1514,48 +1590,69 @@ def _upload_generic(
 
     show_cols = ["account", "asset_type", "asset_name", "asset_id",
                  "quantity", "cost_basis", "market_value"]
-    st.dataframe(
-        _display(df, show_cols).style.format({
-            "כמות":           "{:,.4f}",
-            "עלות (₪)":       "₪{:,.2f}",
-            "שווי נוכחי (₪)": "₪{:,.2f}",
-        }),
-        use_container_width=True, height=300,
+    with st.expander("📋 כל הנתונים מהקובץ", expanded=False):
+        st.dataframe(
+            _display(df, show_cols).style.format({
+                "כמות":           "{:,.4f}",
+                "עלות (₪)":       "₪{:,.2f}",
+                "שווי נוכחי (₪)": "₪{:,.2f}",
+            }),
+            use_container_width=True, height=300,
+        )
+
+    # diff vs current holdings for this account
+    existing_all = st.session_state.holdings
+    existing_acc = (
+        existing_all[existing_all["account"] == account_name]
+        if not existing_all.empty else pd.DataFrame()
     )
+    st.markdown("---")
+    section_header("סנכרון עם התיק הקיים")
+    _show_upload_diff(existing_acc, df)
 
     st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
-    if st.button("✅ הוסף לתיק ושמור", type="primary", key=f"save_{bank_name}"):
-        existing = st.session_state.holdings
-        if not existing.empty:
-            existing = existing[existing["account"] != account_name]
-        _save_holdings(pd.concat([existing, df], ignore_index=True))
-        st.success(f"✓ חשבון **{account_name}** נוסף לתיק ונשמר.")
+    if st.button("✅ סנכרן ושמור", type="primary", key=f"save_{bank_name}"):
+        existing_other = existing_all[existing_all["account"] != account_name] \
+            if not existing_all.empty else pd.DataFrame()
+        _save_holdings(pd.concat([existing_other, df], ignore_index=True))
+        st.success(f"✓ חשבון **{account_name}** סונכרן ונשמר.")
 
 
-def _upload_ibi() -> None:
-    section_header("העלאת קובץ IBI / פסגות")
+def _upload_ibi(broker: str = "פסגות") -> None:
+    section_header(f"העלאת קובץ {broker}")
 
-    st.markdown("""
+    broker_tips = {
+        "IBI":   "ייצא את תיק ההשקעות מפלטפורמת IBI כקובץ Excel והעלה אותו כאן.",
+        "פסגות": "ייצא את תיק ההשקעות מפלטפורמת פסגות כקובץ Excel (Portfolio) והעלה אותו כאן.",
+    }
+    st.markdown(f"""
     <div class="ws-card" style="margin-bottom:1rem;">
       <div style="font-size:.82rem;color:#64748B;line-height:1.8;">
-        ייצא את תיק ההשקעות מפלטפורמת IBI/פסגות כקובץ Excel והעלה אותו כאן.<br>
-        המערכת מזהה אוטומטית את הפורמט (Portfolio החדש או IBI הישן) ומנרמלת את הנתונים.
+        {broker_tips.get(broker, '')}<br>
+        המערכת מזהה אוטומטית את הפורמט ומנרמלת את הנתונים.
       </div>
     </div>""", unsafe_allow_html=True)
 
-    account_name = st.text_input("שם החשבון", value="פסגות",
+    account_name = st.text_input("שם החשבון", value=broker,
                                  help="השם שיופיע בלוח המחוונים.")
-    uploaded = st.file_uploader("גרור לכאן קובץ Excel או לחץ לבחירה", type=["xlsx"])
+    uploaded = st.file_uploader("גרור לכאן קובץ Excel או לחץ לבחירה", type=["xlsx"],
+                                key=f"upload_{broker}")
 
     if uploaded is None:
         return
 
     with st.spinner("מנתח ומנרמל נתונים…"):
         try:
-            df = parse_ibi(io.BytesIO(uploaded.read()), account_name=account_name)
+            df = parse_ibi(io.BytesIO(uploaded.read()),
+                           account_name=account_name,
+                           source=broker)
             df = enrich(df)
         except Exception as exc:
             st.error(f"שגיאה בפענוח: {exc}")
+            st.caption(
+                "וודא שהקובץ יוצא ישירות מהפלטפורמה ולא עבר עריכה ידנית. "
+                "במידת הצורך השתמש בהזנה ידנית."
+            )
             return
 
     total_val  = df["market_value"].sum()
@@ -1568,26 +1665,34 @@ def _upload_ibi() -> None:
     m3.metric("רווח / הפסד",       f"₪{gain:,.0f}",
               f"{(gain/total_cost*100) if total_cost else 0:+.1f}%")
 
-    st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
-
     show_cols = ["account", "asset_type", "asset_name", "asset_id",
                  "quantity", "cost_basis", "market_value"]
-    st.dataframe(
-        _display(df, show_cols).style.format({
-            "כמות":           "{:,.4f}",
-            "עלות (₪)":       "₪{:,.2f}",
-            "שווי נוכחי (₪)": "₪{:,.2f}",
-        }),
-        use_container_width=True, height=300,
+    with st.expander("📋 כל הנתונים מהקובץ", expanded=False):
+        st.dataframe(
+            _display(df, show_cols).style.format({
+                "כמות":           "{:,.4f}",
+                "עלות (₪)":       "₪{:,.2f}",
+                "שווי נוכחי (₪)": "₪{:,.2f}",
+            }),
+            use_container_width=True, height=300,
+        )
+
+    # diff vs current holdings for this account
+    existing_all = st.session_state.holdings
+    existing_acc = (
+        existing_all[existing_all["account"] == account_name]
+        if not existing_all.empty else pd.DataFrame()
     )
+    st.markdown("---")
+    section_header("סנכרון עם התיק הקיים")
+    _show_upload_diff(existing_acc, df)
 
     st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
-    if st.button("✅ הוסף לתיק ושמור", type="primary"):
-        existing = st.session_state.holdings
-        if not existing.empty:
-            existing = existing[existing["account"] != account_name]
-        _save_holdings(pd.concat([existing, df], ignore_index=True))
-        st.success(f"✓ חשבון **{account_name}** נוסף לתיק ונשמר.")
+    if st.button("✅ סנכרן ושמור", type="primary", key=f"save_{broker}"):
+        existing_other = existing_all[existing_all["account"] != account_name] \
+            if not existing_all.empty else pd.DataFrame()
+        _save_holdings(pd.concat([existing_other, df], ignore_index=True))
+        st.success(f"✓ חשבון **{account_name}** סונכרן ונשמר.")
 
 
 def _upload_gamel_pdf() -> None:
