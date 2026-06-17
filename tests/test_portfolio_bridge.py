@@ -1,10 +1,11 @@
 import pandas as pd
 import pytest
 
-from analysis import engine
+from analysis import engine, symbols
 from analysis.portfolio_bridge import (
     entry_price, with_symbols, suggest_stop_target,
     review_portfolio, run_buy_analysis, run_allocate_deposit,
+    load_symbol_overrides, add_symbol_mapping, list_unmapped_assets,
 )
 
 
@@ -94,3 +95,34 @@ def test_run_allocate_deposit_reports_unresolved_candidates(monkeypatch):
                          lambda amount, candidates, **kw: {"deposit": amount, "allocations": [], "waiting": []})
     result = run_allocate_deposit(5000, ["ישראכרט", "שם שלא קיים בכלל בלי אותיות בלבד 123"])
     assert "שם שלא קיים בכלל בלי אותיות בלבד 123" in result["unresolved"]
+
+
+def test_with_symbols_resolves_via_override():
+    overrides = {"גמל להשקעה מסלול כללי": "ESG.TA"}
+    resolved, unresolved = with_symbols(_holdings_df(), overrides=overrides)
+    assert "ESG.TA" in set(resolved["symbol"])
+    assert unresolved.empty
+
+
+def test_load_symbol_overrides_returns_empty_dict_when_sheets_unavailable():
+    # בסביבת הטסטים אין streamlit/gspread מותקנים — הפונקציה צריכה ליפול
+    # בשקט ל-{} בלי לזרוק שגיאה, כדי שלא תקריס review_portfolio/run_buy_analysis.
+    assert load_symbol_overrides() == {}
+
+
+def test_add_symbol_mapping_skips_save_when_verification_fails(monkeypatch):
+    monkeypatch.setattr(symbols, "verify_symbol",
+                         lambda symbol: {"symbol": symbol, "ok": False, "company_name": None,
+                                          "last_price": None, "error": "אין נתוני מסחר"})
+    result = add_symbol_mapping("נייר לא קיים", "FAKE123")
+    assert result["ok"] is False
+
+
+def test_list_unmapped_assets_dedupes_by_name():
+    df = pd.concat([_holdings_df(), pd.DataFrame([
+        {"account": "הראל", "asset_name": "גמל להשקעה מסלול כללי", "asset_id": "",
+         "quantity": 1, "cost_basis": 10000.0, "market_value": 10500.0},
+    ])], ignore_index=True)
+    unmapped = list_unmapped_assets(df)
+    assert len(unmapped) == 1
+    assert unmapped[0]["asset_name"] == "גמל להשקעה מסלול כללי"

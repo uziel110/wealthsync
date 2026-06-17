@@ -50,19 +50,77 @@ def entry_price(row: pd.Series) -> float | None:
     return float(cost) / float(qty)
 
 
-def with_symbols(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def with_symbols(
+    df: pd.DataFrame, overrides: dict[str, str] | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     מפצל את התיק לשתי טבלאות: ניירות שנפתרו לטיקר yfinance (resolved)
     וניירות שלא ניתן למפות (unresolved — בד"כ פנסיה/גמל/מספר נייר ת"א בלי
-    מיפוי שם ב-analysis/symbols.py).
+    מיפוי שם, סטטי או שנוסף מהאתר).
     """
     if df.empty:
         return df, df
     symbols = df.apply(
-        lambda r: resolve_symbol(r.get("asset_name", ""), r.get("asset_id")), axis=1
+        lambda r: resolve_symbol(r.get("asset_name", ""), r.get("asset_id"), overrides=overrides),
+        axis=1,
     )
     resolved = df.assign(symbol=symbols)
     return resolved[resolved["symbol"].notna()].copy(), resolved[resolved["symbol"].isna()].copy()
+
+
+def load_symbol_overrides() -> dict[str, str]:
+    """
+    טוען מיפויים שהמשתמש הוסיף מהאתר (גיליון symbol_overrides) — בנוסף
+    לטבלה הסטטית NAME_TO_SYMBOL. נכשל בשקט ומחזיר {} אם Sheets לא נגיש
+    (למשל בטסטים/סקריפטים שרצים בלי streamlit/gspread).
+    """
+    try:
+        from sheets.gsheets import read_symbol_overrides
+        df = read_symbol_overrides()
+    except Exception:
+        return {}
+    if df.empty or "name" not in df.columns or "symbol" not in df.columns:
+        return {}
+    from .symbols import _normalize
+    return {
+        _normalize(r["name"]): str(r["symbol"]).strip().upper()
+        for _, r in df.iterrows()
+        if str(r.get("name", "")).strip() and str(r.get("symbol", "")).strip()
+    }
+
+
+def add_symbol_mapping(asset_name: str, symbol: str, asset_id: str = "") -> dict:
+    """
+    מאמתת טיקר מול yfinance (verify_symbol) ושומרת את המיפוי בגיליון
+    symbol_overrides רק אם האימות הצליח — לא ניתן להוסיף טיקר לא מאומת
+    מהאתר, אותו עיקרון שחל על NAME_TO_SYMBOL הסטטי (ראו analysis/symbols.py
+    ופרשת NVMI.TA/NXSN.TA ב-CLAUDE.md). מחזירה את תוצאת verify_symbol כך
+    שה-UI יציג למשתמש את שם החברה לאישור.
+    """
+    from .symbols import verify_symbol, _normalize
+    check = verify_symbol(symbol)
+    if check["ok"]:
+        from sheets.gsheets import save_symbol_override
+        save_symbol_override(_normalize(asset_name), symbol.strip().upper(), asset_id)
+    return check
+
+
+def list_unmapped_assets(df: pd.DataFrame | None = None) -> list[dict]:
+    """
+    רשימה ייחודית (לפי שם נייר) של נכסים בתיק שלא נפתרו לטיקר yfinance —
+    לטאב "מיפוי טיקרים" באתר, כך שהמשתמש לא צריך לעבור על כל ההחזקות בנפרד.
+    """
+    if df is None:
+        df = load_holdings()
+    if df.empty:
+        return []
+    overrides = load_symbol_overrides()
+    _, unresolved = with_symbols(df, overrides=overrides)
+    if unresolved.empty:
+        return []
+    cols = [c for c in ("asset_name", "asset_id", "account", "market_value") if c in unresolved.columns]
+    dedup = unresolved[cols].drop_duplicates(subset=["asset_name"]) if "asset_name" in cols else unresolved[cols]
+    return dedup.to_dict("records")
 
 
 def suggest_stop_target(snap: dict, entry: float) -> tuple[float, float]:
@@ -83,7 +141,8 @@ def review_portfolio(df: pd.DataFrame | None = None) -> dict:
     """
     if df is None:
         df = load_holdings()
-    resolved, unresolved = with_symbols(df)
+    overrides = load_symbol_overrides()
+    resolved, unresolved = with_symbols(df, overrides=overrides)
 
     reviewed = []
     for _, row in resolved.iterrows():
@@ -117,8 +176,9 @@ def review_portfolio(df: pd.DataFrame | None = None) -> dict:
 
 
 def run_buy_analysis(query: str) -> dict:
-    """query יכול להיות שם עברי מהמיפוי (analysis/symbols.py) או טיקר ישירות."""
-    symbol = resolve_symbol(query) or query.strip().upper()
+    """query יכול להיות שם עברי מהמיפוי (סטטי או שנוסף מהאתר) או טיקר ישירות."""
+    overrides = load_symbol_overrides()
+    symbol = resolve_symbol(query, overrides=overrides) or query.strip().upper()
     return engine.buy_analysis(symbol)
 
 
@@ -127,9 +187,10 @@ def run_allocate_deposit(amount: float, candidates: list[str]) -> dict:
     candidates: שמות עבריים מהמיפוי או טיקרים. מועמדים שלא ניתן לפתור
     מוחזרים בנפרד תחת "unresolved" כדי שהמשתמש ידע למה הם לא נכללו.
     """
+    overrides = load_symbol_overrides()
     resolved, unresolved = [], []
     for c in candidates:
-        symbol = resolve_symbol(c) or (c.strip().upper() if _looks_like_ticker(c) else None)
+        symbol = resolve_symbol(c, overrides=overrides) or (c.strip().upper() if _looks_like_ticker(c) else None)
         if symbol:
             resolved.append(symbol)
         else:

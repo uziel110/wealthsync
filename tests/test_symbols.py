@@ -26,3 +26,15 @@ def test_resolve_unknown_name_without_asset_id_returns_none():
 def test_mapping_table_has_no_blank_entries():
     for name, symbol in NAME_TO_SYMBOL.items():
         assert name.strip() and symbol.strip()
+
+
+def test_resolve_uses_override_for_unmapped_name():
+    assert resolve_symbol("גמל להשקעה מסלול כללי", overrides={"גמל להשקעה מסלול כללי": "ESG.TA"}) == "ESG.TA"
+
+
+def test_resolve_override_takes_priority_over_static_table():
+    assert resolve_symbol("ישראכרט", overrides={"ישראכרט": "OVERRIDE.TA"}) == "OVERRIDE.TA"
+
+
+def test_resolve_ignores_override_for_other_names():
+    assert resolve_symbol("ישראכרט", overrides={"שם אחר": "X.TA"}) == "ISCD.TA"
