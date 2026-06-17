@@ -31,5 +31,8 @@ Thumbs.db
 # Streamlit cache
 .streamlit/cache/
 
+# Generated analysis reports (contain personal portfolio data)
+reports/
+
 # Claude Code settings (local only)
 .claude/
