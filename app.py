@@ -555,7 +555,8 @@ with st.sidebar:
 
     page = st.radio(
         "ניווט",
-        ["📊 לוח מחוונים", "📈 היסטוריה", "📤 העלאה", "🤖 המלצות AI", "⚙️ הגדרות"],
+        ["📊 לוח מחוונים", "📈 היסטוריה", "📤 העלאה", "🤖 המלצות AI",
+         "🧭 ניתוח השקעות", "⚙️ הגדרות"],
         label_visibility="collapsed",
     )
 
@@ -2289,6 +2290,151 @@ def page_ai() -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# דף: ניתוח השקעות (analysis/ — חינמי, yfinance בלבד)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_ANALYSIS_VERDICT_HE = {"buy": ("קנייה", "gain"), "wait": ("המתנה", "warn"),
+                         "skip": ("דילוג", "loss"), "no_data": ("אין נתונים", "warn")}
+_ANALYSIS_ACTION_HE = {"hold": ("להחזיק", "info"), "add": ("להוסיף", "gain"),
+                        "trim": ("לקצץ חלקית", "warn"), "sell": ("למכור", "loss"),
+                        "no_data": ("אין נתונים", "warn")}
+
+
+def _analysis_disclaimer() -> None:
+    st.markdown("""
+    <div class="ws-card" style="border-right:3px solid #D97706;">
+      <div style="font-size:.8rem;color:#92400E;">
+        ⚠️ למחקר אישי בלבד — לא ייעוץ השקעות מוסמך. מבוסס נתוני yfinance בלבד.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_buy_analysis(query: str) -> dict:
+    from analysis.portfolio_bridge import run_buy_analysis
+    return run_buy_analysis(query)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_review_portfolio(df: pd.DataFrame) -> dict:
+    from analysis.portfolio_bridge import review_portfolio
+    return review_portfolio(df)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_allocate_deposit(amount: float, candidates: tuple[str, ...]) -> dict:
+    from analysis.portfolio_bridge import run_allocate_deposit
+    return run_allocate_deposit(amount, list(candidates))
+
+
+def page_invest_analysis() -> None:
+    page_header("🧭", "ניתוח השקעות",
+                "ניתוח טכני חינמי מעל yfinance · RSI · MACD · בולינגר · ATR")
+    _analysis_disclaimer()
+
+    tab_buy, tab_review, tab_deposit = st.tabs(
+        ["📈 ניתוח קנייה", "🗓️ סקירה שבועית", "💰 הקצאת הפקדה"]
+    )
+
+    # ── ניתוח קנייה ──────────────────────────────────────────────────────────
+    with tab_buy:
+        section_header("בדיקת מניה")
+        query = st.text_input(
+            "סימבול או שם נייר ממופה",
+            placeholder="לדוגמה: AAPL, ISCD.TA, ישראכרט",
+            key="analysis_buy_query",
+        )
+        if st.button("נתח", type="primary", key="analysis_buy_btn") and query.strip():
+            with st.spinner("מאחזר נתוני שוק…"):
+                result = _cached_buy_analysis(query.strip())
+
+            if result.get("verdict", "no_data") == "no_data":
+                st.warning("אין נתוני שוק עבור הסימבול הזה — בדוק את הטיקר או הוסף מיפוי ב-`analysis/symbols.py`.")
+            else:
+                verdict_label, verdict_kind = _ANALYSIS_VERDICT_HE[result["verdict"]]
+                lo, hi = result["entry_zone"]
+                st.markdown(
+                    f"### {result['symbol']} — {badge(verdict_label, verdict_kind)}",
+                    unsafe_allow_html=True,
+                )
+                m1, m2, m3 = st.columns(3)
+                m1.metric("מחיר נוכחי", result["price"])
+                m2.metric("ניקוד", f"{result['score']}/100")
+                m3.metric("תזמון", result["timing"])
+                m4, m5, m6 = st.columns(3)
+                m4.metric("אזור כניסה", f"{lo} – {hi}")
+                m5.metric("סטופ מוצע", result["stop"])
+                m6.metric("יעד מוצע", result["target"])
+                st.markdown("**נימוקים:**\n" + "\n".join(f"- {r}" for r in result["reasons"]))
+
+    # ── סקירה שבועית ─────────────────────────────────────────────────────────
+    with tab_review:
+        section_header("סקירת התיק הנוכחי")
+        holdings = st.session_state.holdings
+        if holdings.empty:
+            st.info("טרם נטענו נתונים — עבור ל-**📤 העלאה** כדי להוסיף חשבונות.")
+        elif st.button("🔄 הרץ סקירה", type="primary", key="analysis_review_btn"):
+            with st.spinner("מנתח את כל ההחזקות…"):
+                review = _cached_review_portfolio(holdings)
+
+            if not review["reviewed"]:
+                st.warning("אין החזקות שניתן למפות לטיקר yfinance.")
+            for r in review["reviewed"]:
+                action_label, action_kind = _ANALYSIS_ACTION_HE.get(r.get("action", "no_data"),
+                                                                     ("?", "info"))
+                pnl = f"{r['pnl_pct']:+.1f}%" if r.get("pnl_pct") is not None else "—"
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
+                    c1.markdown(f"**{r.get('asset_name', r.get('symbol'))}** ({r.get('symbol', '')})")
+                    c2.markdown(badge(action_label, action_kind), unsafe_allow_html=True)
+                    c3.markdown(f"רווח/הפסד: {pnl}")
+                    c4.markdown(
+                        f"סטופ מוצע: {r.get('suggested_stop', '—')} · יעד מוצע: {r.get('suggested_target', '—')}"
+                    )
+                    if r.get("reasons"):
+                        st.caption(" · ".join(r["reasons"]))
+
+            if review["unresolved"]:
+                with st.expander(f"⚠️ {len(review['unresolved'])} ניירות לא נותחו (אין מיפוי טיקר)"):
+                    st.dataframe(pd.DataFrame(review["unresolved"]), use_container_width=True, hide_index=True)
+                    st.caption("הוסף מיפוי שם → טיקר ב-`analysis/symbols.py` כדי לכלול ניירות אלה.")
+
+    # ── הקצאת הפקדה ──────────────────────────────────────────────────────────
+    with tab_deposit:
+        section_header("חלוקת הפקדה חדשה")
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            amount = st.number_input("סכום ההפקדה (₪)", min_value=0.0, value=2000.0, step=500.0,
+                                     key="analysis_deposit_amount")
+        with c2:
+            candidates_raw = st.text_input(
+                "מועמדים (שמות ממופים או טיקרים, מופרדים בפסיק)",
+                placeholder="לדוגמה: ישראכרט, נקסט ויזן, AAPL",
+                key="analysis_deposit_candidates",
+            )
+        if st.button("חשב הקצאה", type="primary", key="analysis_deposit_btn") and candidates_raw.strip():
+            candidates = tuple(c.strip() for c in candidates_raw.split(",") if c.strip())
+            with st.spinner("מנתח מועמדים…"):
+                allocation = _cached_allocate_deposit(amount, candidates)
+
+            if allocation["allocations"]:
+                rows = [{
+                    "סימבול": a["symbol"], "סכום (₪)": a["amount"], "מניות": a["shares"],
+                    "אזור כניסה": f"{a['entry_zone'][0]}–{a['entry_zone'][1]}",
+                    "סטופ": a["stop"], "יעד": a["target"],
+                } for a in allocation["allocations"]]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                st.metric("נשאר במזומן", f"₪{allocation['cash_left']:,.0f}")
+            else:
+                st.info(allocation.get("note", "אין מועמדות אטרקטיביות כרגע."))
+
+            if allocation.get("waiting"):
+                st.caption("בהמתנה: " + " · ".join(f"{s} ({t})" for s, t in allocation["waiting"]))
+            if allocation.get("unresolved"):
+                st.warning(f"לא נפתרו לטיקר: {', '.join(allocation['unresolved'])}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ניתוב
 # ═════════════════════════════════════════════════════════════════════════════
 if page == "📊 לוח מחוונים":
@@ -2299,5 +2445,7 @@ elif page == "📤 העלאה":
     page_upload()
 elif page == "🤖 המלצות AI":
     page_ai()
+elif page == "🧭 ניתוח השקעות":
+    page_invest_analysis()
 elif page == "⚙️ הגדרות":
     page_settings()
