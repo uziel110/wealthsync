@@ -22,7 +22,7 @@ st.set_page_config(
     page_title="WealthSync",
     page_icon="💰",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -70,6 +70,7 @@ html, body, [class*="css"], .stApp {
 [data-testid="stSidebar"] {
   background: var(--sidebar-bg) !important;
   direction: rtl !important;
+  overflow: hidden !important;
 }
 [data-testid="stSidebar"] * { color: #CBD5E1 !important; direction: rtl !important; }
 [data-testid="stSidebar"] .stRadio label {
@@ -214,6 +215,16 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
 @media (max-width: 768px) {
   .block-container { padding: 1rem .75rem !important; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
+  [data-testid="stMetric"] { padding: .85rem 1rem !important; min-height: 80px; }
+  [data-testid="stAppDeployButton"], [data-testid="stMainMenu"] { display: none !important; }
+  .ws-page-header { padding: 1rem 1.1rem !important; gap: .5rem !important; flex-wrap: wrap !important; }
+  .ws-page-header-icon { font-size: 1.3rem !important; }
+  .ws-page-header-title { font-size: 1.1rem !important; }
+  .ws-card { padding: 1rem !important; }
+  h1 { font-size: 1.4rem !important; }
+  h2 { font-size: 1.15rem !important; }
+  .stButton > button { min-height: 42px !important; }
+  [data-testid="stSidebar"] { width: 85vw !important; min-width: 0 !important; }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -2327,13 +2338,19 @@ def _cached_allocate_deposit(amount: float, candidates: tuple[str, ...]) -> dict
     return run_allocate_deposit(amount, list(candidates))
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_list_unmapped(df: pd.DataFrame) -> list[dict]:
+    from analysis.portfolio_bridge import list_unmapped_assets
+    return list_unmapped_assets(df)
+
+
 def page_invest_analysis() -> None:
     page_header("🧭", "ניתוח השקעות",
                 "ניתוח טכני חינמי מעל yfinance · RSI · MACD · בולינגר · ATR")
     _analysis_disclaimer()
 
-    tab_buy, tab_review, tab_deposit = st.tabs(
-        ["📈 ניתוח קנייה", "🗓️ סקירה שבועית", "💰 הקצאת הפקדה"]
+    tab_buy, tab_review, tab_deposit, tab_mapping = st.tabs(
+        ["📈 ניתוח קנייה", "🗓️ סקירה שבועית", "💰 הקצאת הפקדה", "🔗 מיפוי טיקרים"]
     )
 
     # ── ניתוח קנייה ──────────────────────────────────────────────────────────
@@ -2397,7 +2414,7 @@ def page_invest_analysis() -> None:
             if review["unresolved"]:
                 with st.expander(f"⚠️ {len(review['unresolved'])} ניירות לא נותחו (אין מיפוי טיקר)"):
                     st.dataframe(pd.DataFrame(review["unresolved"]), use_container_width=True, hide_index=True)
-                    st.caption("הוסף מיפוי שם → טיקר ב-`analysis/symbols.py` כדי לכלול ניירות אלה.")
+                    st.caption("עבור לטאב '🔗 מיפוי טיקרים' כדי להוסיף מיפוי לניירות אלה.")
 
     # ── הקצאת הפקדה ──────────────────────────────────────────────────────────
     with tab_deposit:
@@ -2432,6 +2449,51 @@ def page_invest_analysis() -> None:
                 st.caption("בהמתנה: " + " · ".join(f"{s} ({t})" for s, t in allocation["waiting"]))
             if allocation.get("unresolved"):
                 st.warning(f"לא נפתרו לטיקר: {', '.join(allocation['unresolved'])}")
+
+    # ── מיפוי טיקרים ─────────────────────────────────────────────────────────
+    with tab_mapping:
+        section_header("ניירות בתיק שלא נפתרו לטיקר yfinance")
+        holdings = st.session_state.holdings
+        if holdings.empty:
+            st.info("טרם נטענו נתונים — עבור ל-**📤 העלאה** כדי להוסיף חשבונות.")
+        else:
+            unmapped = _cached_list_unmapped(holdings)
+            if not unmapped:
+                st.success("כל הניירות בתיק נפתרו לטיקר — אין צורך במיפוי נוסף.")
+            for i, item in enumerate(unmapped):
+                name = item.get("asset_name", "") or ""
+                asset_id = item.get("asset_id", "") or ""
+                with st.container(border=True):
+                    mv = item.get("market_value")
+                    st.markdown(
+                        f"**{name}** · חשבון: {item.get('account', '—')}"
+                        + (f" · שווי: ₪{mv:,.0f}" if mv else "")
+                        + (f" · מספר נייר: {asset_id}" if asset_id else "")
+                    )
+                    c1, c2 = st.columns([2, 1])
+                    ticker = c1.text_input(
+                        "טיקר yfinance", key=f"map_ticker_{i}", placeholder="לדוגמה: ISCD.TA",
+                    )
+                    if c2.button("בדוק טיקר", key=f"map_check_{i}") and ticker.strip():
+                        from analysis.symbols import verify_symbol
+                        st.session_state[f"map_result_{i}"] = verify_symbol(ticker.strip())
+
+                    check = st.session_state.get(f"map_result_{i}")
+                    if check:
+                        if check["ok"]:
+                            st.success(
+                                f"✅ {check['company_name']} · מחיר אחרון: {check['last_price']:.2f} "
+                                "— בדוק שזו החברה הנכונה לפני השמירה."
+                            )
+                            if st.button("שמור מיפוי", key=f"map_save_{i}", type="primary"):
+                                from analysis.portfolio_bridge import add_symbol_mapping
+                                add_symbol_mapping(name, ticker.strip(), asset_id)
+                                st.session_state.pop(f"map_result_{i}", None)
+                                st.cache_data.clear()
+                                st.success("המיפוי נשמר.")
+                                st.rerun()
+                        else:
+                            st.error(f"❌ לא נמצאו נתונים לטיקר הזה: {check.get('error', '')}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

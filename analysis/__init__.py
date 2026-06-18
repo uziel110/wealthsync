@@ -8,6 +8,9 @@ from .portfolio_bridge import (
     review_portfolio,
     run_buy_analysis,
     run_allocate_deposit,
+    load_symbol_overrides,
+    add_symbol_mapping,
+    list_unmapped_assets,
 )
 
 __all__ = [
@@ -15,4 +18,5 @@ __all__ = [
     "resolve_symbol", "verify_symbol", "NAME_TO_SYMBOL",
     "load_holdings", "entry_price", "with_symbols", "suggest_stop_target",
     "review_portfolio", "run_buy_analysis", "run_allocate_deposit",
+    "load_symbol_overrides", "add_symbol_mapping", "list_unmapped_assets",
 ]

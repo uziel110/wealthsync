@@ -20,6 +20,8 @@ _SNAPSHOT_COLS = [
     "asset_type", "market_value", "cost_basis", "gain_loss", "gain_pct",
 ]
 
+_SYMBOL_OVERRIDE_COLS = ["name", "symbol", "asset_id", "added_at"]
+
 
 @st.cache_resource(show_spinner=False)
 def get_client() -> gspread.Client:
@@ -105,6 +107,34 @@ def append_snapshot(df: pd.DataFrame, worksheet_name: str = "snapshots") -> None
         return
 
     ws.append_rows(new_rows.fillna("").astype(str).values.tolist())
+
+
+def read_symbol_overrides(worksheet_name: str = "symbol_overrides") -> pd.DataFrame:
+    """User-added name -> yfinance-ticker mappings, created from the app UI."""
+    try:
+        ws = _open_sheet(worksheet_name)
+        records = ws.get_all_records()
+        return pd.DataFrame(records) if records else pd.DataFrame(columns=_SYMBOL_OVERRIDE_COLS)
+    except Exception:
+        return pd.DataFrame(columns=_SYMBOL_OVERRIDE_COLS)
+
+
+def save_symbol_override(name: str, symbol: str, asset_id: str = "",
+                          worksheet_name: str = "symbol_overrides") -> None:
+    """Upsert one row into symbol_overrides by name (re-saving a name replaces its mapping)."""
+    ws = _open_sheet(worksheet_name, rows=1000, cols=len(_SYMBOL_OVERRIDE_COLS))
+    existing_vals = ws.get_all_values()
+    existing_vals = [r for r in existing_vals if any(c.strip() for c in r)]
+
+    if not existing_vals or existing_vals[0] != _SYMBOL_OVERRIDE_COLS:
+        data_rows = existing_vals if (existing_vals and existing_vals[0] != _SYMBOL_OVERRIDE_COLS) else []
+        existing_vals = [_SYMBOL_OVERRIDE_COLS] + data_rows
+
+    rows = [r for r in existing_vals[1:] if r and r[0] != name]
+    rows.append([name, symbol, asset_id, datetime.now().strftime("%Y-%m-%d %H:%M")])
+
+    ws.clear()
+    ws.update([_SYMBOL_OVERRIDE_COLS] + rows)
 
 
 def read_snapshots(worksheet_name: str = "snapshots") -> pd.DataFrame:

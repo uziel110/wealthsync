@@ -37,7 +37,10 @@ analysis/
                         import עצלן בתוך הפונקציה כדי שטסטים/CLI לא יזדקקו
                         ל-streamlit/gspread), entry_price(), with_symbols()
                         (resolved/unresolved), review_portfolio(),
-                        run_buy_analysis(), run_allocate_deposit().
+                        run_buy_analysis(), run_allocate_deposit(),
+                        load_symbol_overrides()/add_symbol_mapping()/
+                        list_unmapped_assets() (מיפוי טיקרים שנוסף מהאתר,
+                        ראו "מיפוי טיקרים מהאתר" למטה).
   report.py             generator ל-HTML כהה RTL (ל-CLI/דוחות עצמאיים).
 tools/verify_symbols.py  סקריפט עצמאי שמריץ verify_symbol() על כל הטבלה.
 cli.py                   buy SYMBOL / review / deposit AMOUNT --candidates...
@@ -68,6 +71,20 @@ tests/                   24 טסטים, ללא רשת (snapshot סינתטי / D
   מתבסס בשקט על חברה שגויה.
 - **לא נוגעים ב-`page_ai()`** (תכונת "🤖 המלצות AI" הקיימת, מבוססת Gemini) —
   שכבה נפרדת ולא קשורה.
+- **מיפוי טיקרים מהאתר (טאב "🔗 מיפוי טיקרים")**: בנוסף ל-`NAME_TO_SYMBOL`
+  הסטטי (נשמר ב-git, מאומת ב-`tools/verify_symbols.py`), המשתמש יכול להוסיף
+  מיפוי שם→טיקר בזמן ריצה מעמוד ה-Streamlit, לניירות שמופיעים ב"לא נותחו".
+  המיפויים האלה נשמרים בגיליון Sheets חדש, `symbol_overrides`
+  (`name, symbol, asset_id, added_at`), דרך `sheets.gsheets.save_symbol_override`
+  (upsert לפי name). **לא שינינו** את ה-dict הסטטי בקוד — overrides נטענים
+  בזמן ריצה (`portfolio_bridge.load_symbol_overrides()`, עם fallback שקט ל-`{}`
+  אם Sheets לא נגיש) ומוזרקים ל-`resolve_symbol(..., overrides=...)` שבודק
+  אותם *לפני* הטבלה הסטטית. נבחר worksheet (ולא קובץ JSON מקומי) כי זה
+  תואם את העיקרון "אין DB מקומי" ועובד גם בפריסת Streamlit Cloud (filesystem
+  לא persistent בין ריסטארטים). העקרון "כל טיקר חדש חייב אימות מול yfinance
+  לפני הוספה" נשמר: ה-UI מריץ `verify_symbol` ומציג שם חברה+מחיר למשתמש,
+  ושומר בפועל (`add_symbol_mapping`) רק אם האימות הצליח — אבל בדיקת
+  "זו אכן החברה הנכונה" (כמו NVMI.TA/NXSN.TA) היא עדיין על המשתמש, לא אוטומטית.
 
 ## איך להריץ
 

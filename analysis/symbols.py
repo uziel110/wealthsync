@@ -44,17 +44,24 @@ def _normalize(name: str) -> str:
     return _BIDI_CHARS.sub("", str(name)).strip()
 
 
-def resolve_symbol(asset_name: str, asset_id: str | None = None) -> str | None:
+def resolve_symbol(
+    asset_name: str, asset_id: str | None = None, overrides: dict[str, str] | None = None
+) -> str | None:
     """
     מנסה לפתור שם/מספר נייר מהתיק לטיקר yfinance.
 
     סדר עדיפות:
-      1. התאמה מדויקת של asset_name (מנורמל) בטבלת NAME_TO_SYMBOL
-      2. אם asset_id מורכב מאותיות בלבד (כמו "AAPL", "TEVA") — מניחים
+      1. overrides — מיפויים שהמשתמש הוסיף מהאתר (ראו
+         portfolio_bridge.load_symbol_overrides/add_symbol_mapping), כדי
+         שיוכל לתקן מיפוי קיים בלי לחכות לדיפלוי קוד חדש
+      2. התאמה מדויקת של asset_name (מנורמל) בטבלת NAME_TO_SYMBOL הסטטית
+      3. אם asset_id מורכב מאותיות בלבד (כמו "AAPL", "TEVA") — מניחים
          שזה כבר טיקר yfinance תקני ומחזירים אותו כפי שהוא
-      3. None — לא ניתן לפתור (למשל מספר נייר ת"א בלי מיפוי שם)
+      4. None — לא ניתן לפתור (למשל מספר נייר ת"א בלי מיפוי שם)
     """
     name = _normalize(asset_name)
+    if overrides and name in overrides:
+        return overrides[name]
     if name in NAME_TO_SYMBOL:
         return NAME_TO_SYMBOL[name]
 
