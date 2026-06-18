@@ -38,3 +38,18 @@ def test_resolve_override_takes_priority_over_static_table():
 
 def test_resolve_ignores_override_for_other_names():
     assert resolve_symbol("ישראכרט", overrides={"שם אחר": "X.TA"}) == "ISCD.TA"
+
+
+def test_resolve_uses_override_by_asset_id_when_name_differs():
+    # שם הקרן בייצוא הזה שונה מהשם שהמשתמש מיפה בעבר, אבל מספר הנייר קבוע
+    assert resolve_symbol(
+        "מנוטרלת מט\"ח - 500 P&S י(A4) הראל מחקה", asset_id="5127527",
+        overrides={"5127527": "SPY"},
+    ) == "SPY"
+
+
+def test_resolve_name_override_takes_priority_over_asset_id_override():
+    assert resolve_symbol(
+        "ישראכרט", asset_id="1081124",
+        overrides={"ישראכרט": "BY_NAME.TA", "1081124": "BY_ID.TA"},
+    ) == "BY_NAME.TA"

@@ -51,21 +51,26 @@ def resolve_symbol(
     מנסה לפתור שם/מספר נייר מהתיק לטיקר yfinance.
 
     סדר עדיפות:
-      1. overrides — מיפויים שהמשתמש הוסיף מהאתר (ראו
-         portfolio_bridge.load_symbol_overrides/add_symbol_mapping), כדי
-         שיוכל לתקן מיפוי קיים בלי לחכות לדיפלוי קוד חדש
-      2. התאמה מדויקת של asset_name (מנורמל) בטבלת NAME_TO_SYMBOL הסטטית
-      3. אם asset_id מורכב מאותיות בלבד (כמו "AAPL", "TEVA") — מניחים
+      1. overrides לפי asset_name (מנורמל) — מיפויים שהמשתמש הוסיף מהאתר
+         (ראו portfolio_bridge.load_symbol_overrides/add_symbol_mapping)
+      2. overrides לפי asset_id (מספר נייר ת"א) — שמות קרנות נאמנות
+         משתנים מעט בין ברוקרים/ייצואים, אבל מספר הנייר קבוע, אז הוא
+         מפתח התאמה אמין יותר לסוג הנכס הזה
+      3. התאמה מדויקת של asset_name (מנורמל) בטבלת NAME_TO_SYMBOL הסטטית
+      4. אם asset_id מורכב מאותיות בלבד (כמו "AAPL", "TEVA") — מניחים
          שזה כבר טיקר yfinance תקני ומחזירים אותו כפי שהוא
-      4. None — לא ניתן לפתור (למשל מספר נייר ת"א בלי מיפוי שם)
+      5. None — לא ניתן לפתור (למשל מספר נייר ת"א בלי מיפוי)
     """
     name = _normalize(asset_name)
-    if overrides and name in overrides:
-        return overrides[name]
+    aid = _normalize(asset_id or "")
+    if overrides:
+        if name in overrides:
+            return overrides[name]
+        if aid and aid in overrides:
+            return overrides[aid]
     if name in NAME_TO_SYMBOL:
         return NAME_TO_SYMBOL[name]
 
-    aid = _normalize(asset_id or "")
     if aid and aid.replace(".", "").isalpha() and len(aid) <= 10:
         return aid.upper()
 

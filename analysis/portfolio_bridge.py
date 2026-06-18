@@ -68,6 +68,31 @@ def with_symbols(
     return resolved[resolved["symbol"].notna()].copy(), resolved[resolved["symbol"].isna()].copy()
 
 
+def _overrides_from_df(df: pd.DataFrame) -> dict[str, str]:
+    """
+    בונה מילון מיפויים מתוך טבלת symbol_overrides. כל מיפוי נכנס פעמיים —
+    לפי שם מנורמל ולפי מספר נייר (asset_id), אם קיים — כך ש-resolve_symbol
+    יוכל להתאים גם כששם הנייר משתנה מעט בין ברוקרים/ייצואים אבל מספר הנייר
+    נשאר קבוע (ראו symbols.resolve_symbol). מופרד מ-load_symbol_overrides
+    כדי שניתן לבדוק אותו בטסטים בלי תלות ב-sheets.gsheets/gspread.
+    """
+    if df.empty or "name" not in df.columns or "symbol" not in df.columns:
+        return {}
+    from .symbols import _normalize
+    overrides: dict[str, str] = {}
+    for _, r in df.iterrows():
+        symbol = str(r.get("symbol", "")).strip().upper()
+        if not symbol:
+            continue
+        name = str(r.get("name", "")).strip()
+        if name:
+            overrides[_normalize(name)] = symbol
+        asset_id = str(r.get("asset_id", "")).strip()
+        if asset_id:
+            overrides[_normalize(asset_id)] = symbol
+    return overrides
+
+
 def load_symbol_overrides() -> dict[str, str]:
     """
     טוען מיפויים שהמשתמש הוסיף מהאתר (גיליון symbol_overrides) — בנוסף
@@ -79,14 +104,7 @@ def load_symbol_overrides() -> dict[str, str]:
         df = read_symbol_overrides()
     except Exception:
         return {}
-    if df.empty or "name" not in df.columns or "symbol" not in df.columns:
-        return {}
-    from .symbols import _normalize
-    return {
-        _normalize(r["name"]): str(r["symbol"]).strip().upper()
-        for _, r in df.iterrows()
-        if str(r.get("name", "")).strip() and str(r.get("symbol", "")).strip()
-    }
+    return _overrides_from_df(df)
 
 
 def add_symbol_mapping(asset_name: str, symbol: str, asset_id: str = "") -> dict:

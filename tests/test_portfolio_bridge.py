@@ -110,6 +110,16 @@ def test_load_symbol_overrides_returns_empty_dict_when_sheets_unavailable():
     assert load_symbol_overrides() == {}
 
 
+def test_overrides_from_df_indexes_by_name_and_asset_id():
+    from analysis.portfolio_bridge import _overrides_from_df
+    df = pd.DataFrame([
+        {"name": "מנוטרלת מטח 500", "symbol": "SPY", "asset_id": "5127527", "added_at": ""},
+    ])
+    overrides = _overrides_from_df(df)
+    assert overrides["מנוטרלת מטח 500"] == "SPY"
+    assert overrides["5127527"] == "SPY"
+
+
 def test_add_symbol_mapping_skips_save_when_verification_fails(monkeypatch):
     monkeypatch.setattr(symbols, "verify_symbol",
                          lambda symbol: {"symbol": symbol, "ok": False, "company_name": None,
