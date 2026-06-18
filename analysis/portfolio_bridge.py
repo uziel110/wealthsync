@@ -134,6 +134,31 @@ def suggest_stop_target(snap: dict, entry: float) -> tuple[float, float]:
     return stop, target
 
 
+def _num(x) -> float | None:
+    """המרה בטוחה לסקלר float (מתעלמת מפסיקים/ריק/NaN)."""
+    try:
+        v = float(str(x).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(v) else v
+
+
+def proxy_levels(snap: dict, price: float) -> tuple[float, float]:
+    """
+    סטופ/יעד ביחידות של ``price`` עצמו (המטבע של ההחזקה האמיתית), כשהתנודתיות
+    (ATR) ורמת ההתנגדות של הפרוקסי נלקחות כ**אחוזים** — כך שנייר שקלי שממופה
+    לפרוקסי דולרי (GLD/SPY) מקבל סטופ/יעד הגיוניים בש"ח במקום לערבב יחידות
+    (₪ מול $). אחוזים הם חסרי-מטבע, אז הסיגנל תקף בכל מקרה.
+    """
+    ref = snap.get("price") or price
+    atr_pct = ((snap.get("atr") or ref * 0.03) / ref) if ref else 0.03
+    res = snap.get("resistance")
+    res_pct = max((res - ref) / ref, 0.0) if (res and ref) else 0.0
+    stop = round(price * (1 - engine.ATR_STOP_MULT * atr_pct), 2)
+    target = round(price * (1 + max(engine.ATR_TARGET_MULT * atr_pct, res_pct)), 2)
+    return stop, target
+
+
 def review_portfolio(df: pd.DataFrame | None = None) -> dict:
     """
     סוקרת את כל ההחזקות הניתנות לניתוח (יש להן טיקר yfinance שנפתר).
@@ -155,15 +180,31 @@ def review_portfolio(df: pd.DataFrame | None = None) -> dict:
                 "symbol": symbol, "action": "no_data", "reasons": ["אין נתוני שוק"],
             })
             continue
-        sug_stop, sug_target = suggest_stop_target(snap, entry or snap["price"])
-        result = engine.review_holding(symbol, entry_price=entry,
-                                        stop=sug_stop, target=sug_target, snap=snap)
+        # רווח/הפסד והמחירים מחושבים מההחזקה האמיתית (במטבע שלה), בעוד הפרוקסי
+        # מספק רק תנודתיות/רמות כאחוזים — כך נייר שקלי שממופה לפרוקסי דולרי
+        # (GLD/SPY) מקבל מספרים שקליים נכונים במקום לערבב ₪ מול $.
+        qty  = _num(row.get("quantity"))
+        cost = _num(row.get("cost_basis"))
+        mv   = _num(row.get("market_value"))
+        real_price = (mv / qty) if (mv and qty) else (entry or snap["price"])
+        pnl_pct = ((mv - cost) / cost * 100) if (mv is not None and cost) else None
+
+        sug_stop, sug_target = proxy_levels(snap, real_price)
+        # אי-התאמת יחידות/מטבע: מחיר הכניסה (יחידות אמיתיות) מול מחיר הפרוקסי
+        is_proxy = bool(
+            entry and snap.get("price")
+            and max(entry, snap["price"]) / max(min(entry, snap["price"]), 1e-9) > 5
+        )
+
+        result = engine.review_holding(symbol, snap=snap, pnl_pct=pnl_pct)
         result["account"] = row.get("account")
         result["asset_name"] = row.get("asset_name")
         result["quantity"] = row.get("quantity")
         result["entry_price"] = round(entry, 2) if entry else None
+        result["current_price"] = round(real_price, 2) if real_price else None
         result["suggested_stop"] = sug_stop
         result["suggested_target"] = sug_target
+        result["is_proxy"] = is_proxy
         reviewed.append(result)
 
     unresolved_list = [

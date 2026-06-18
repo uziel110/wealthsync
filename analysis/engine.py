@@ -176,12 +176,15 @@ def buy_analysis(symbol, snap=None):
 # ===========================================================================
 # 2. סקירת אחזקה קיימת (שבועי) — מה לעשות
 # ===========================================================================
-def review_holding(symbol, entry_price=None, stop=None, target=None, snap=None):
+def review_holding(symbol, entry_price=None, stop=None, target=None, snap=None, pnl_pct=None):
     snap = snap or snapshot(symbol)
     if not snap:
         return {"symbol": symbol, "action": "no_data", "reasons": ["אין נתוני שוק"]}
     p = snap["price"]
-    pnl = ((p - entry_price)/entry_price*100) if entry_price else None
+    # pnl_pct may be supplied from the real holding (currency-correct); fall back
+    # to comparing the snapshot price against the entry (same-unit holdings only).
+    pnl = pnl_pct if pnl_pct is not None else (
+        ((p - entry_price)/entry_price*100) if entry_price else None)
     reasons, action = [], "hold"
 
     broke_stop = stop and p <= stop

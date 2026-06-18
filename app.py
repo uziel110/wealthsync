@@ -2429,6 +2429,11 @@ def page_invest_analysis() -> None:
                     )
                     if r.get("reasons"):
                         st.caption(" · ".join(r["reasons"]))
+                    if r.get("is_proxy"):
+                        st.caption(
+                            "🔗 נייר ממופה לפרוקסי: הסיגנל הטכני (מגמה/מומנטום) מגיע מהפרוקסי, "
+                            "ואילו רווח/הפסד, סטופ ויעד מחושבים לפי ההחזקה האמיתית שלך (₪)."
+                        )
 
             if review["unresolved"]:
                 with st.expander(f"⚠️ {len(review['unresolved'])} ניירות לא נותחו (אין מיפוי טיקר)"):

@@ -3,7 +3,7 @@ import pytest
 
 from analysis import engine, symbols
 from analysis.portfolio_bridge import (
-    entry_price, with_symbols, suggest_stop_target,
+    entry_price, with_symbols, suggest_stop_target, proxy_levels,
     review_portfolio, run_buy_analysis, run_allocate_deposit,
     load_symbol_overrides, add_symbol_mapping, list_unmapped_assets,
 )
@@ -116,6 +116,34 @@ def test_add_symbol_mapping_skips_save_when_verification_fails(monkeypatch):
                                           "last_price": None, "error": "אין נתוני מסחר"})
     result = add_symbol_mapping("נייר לא קיים", "FAKE123")
     assert result["ok"] is False
+
+
+def test_proxy_levels_scale_to_holding_units_not_proxy():
+    # פרוקסי דולרי (price 388, atr 9) מול מחיר החזקה שקלי (1.8) — הסטופ/יעד
+    # צריכים לצאת ביחידות של ההחזקה (~1.8), לא ביחידות הפרוקסי.
+    snap = {"price": 388.6, "atr": 9.1, "resistance": 448.0}
+    stop, target = proxy_levels(snap, price=1.8)
+    assert 1.0 < stop < 1.8          # סטופ מעט מתחת למחיר ההחזקה
+    assert 1.8 < target < 2.5        # יעד מעט מעל — לא 448 ולא שלילי
+
+
+def test_review_pnl_from_real_holding_not_proxy_price(monkeypatch):
+    # קרן שקלית (entry ~1.71) שממופה לפרוקסי דולרי GLD (price 388): רווח/הפסד
+    # חייב לבוא מ-market_value/cost_basis (אמיתי), לא מהשוואת 388 מול 1.71.
+    gld = {"price": 388.6, "rsi": 45, "rsi_prev": 47, "macd_hist": -0.5,
+           "macd_hist_prev": -0.2, "bb_lower": 380, "bb_mid": 400, "bb_upper": 420,
+           "atr": 9.1, "sma50": 400, "sma200": 360, "support": 378, "resistance": 448}
+    monkeypatch.setattr(engine, "snapshot", lambda symbol: gld)
+
+    df = pd.DataFrame([{
+        "account": "מיטב", "asset_name": "זהב מיטב", "asset_id": "GLD",
+        "quantity": 29155, "cost_basis": 50000.0, "market_value": 53000.0,
+    }])
+    r = review_portfolio(df)["reviewed"][0]
+    assert r["pnl_pct"] == pytest.approx(6.0, abs=0.5)   # (53000-50000)/50000
+    assert r["suggested_stop"] > 0                        # לא שלילי
+    assert r["suggested_stop"] < r["current_price"] < r["suggested_target"]
+    assert r["is_proxy"] is True
 
 
 def test_list_unmapped_assets_dedupes_by_name():
