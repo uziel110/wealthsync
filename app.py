@@ -22,7 +22,7 @@ st.set_page_config(
     page_title="WealthSync",
     page_icon="💰",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -70,6 +70,7 @@ html, body, [class*="css"], .stApp {
 [data-testid="stSidebar"] {
   background: var(--sidebar-bg) !important;
   direction: rtl !important;
+  overflow: hidden !important;
 }
 [data-testid="stSidebar"] * { color: #CBD5E1 !important; direction: rtl !important; }
 [data-testid="stSidebar"] .stRadio label {
@@ -214,6 +215,16 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
 @media (max-width: 768px) {
   .block-container { padding: 1rem .75rem !important; }
   [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
+  [data-testid="stMetric"] { padding: .85rem 1rem !important; min-height: 80px; }
+  [data-testid="stAppDeployButton"], [data-testid="stMainMenu"] { display: none !important; }
+  .ws-page-header { padding: 1rem 1.1rem !important; gap: .5rem !important; flex-wrap: wrap !important; }
+  .ws-page-header-icon { font-size: 1.3rem !important; }
+  .ws-page-header-title { font-size: 1.1rem !important; }
+  .ws-card { padding: 1rem !important; }
+  h1 { font-size: 1.4rem !important; }
+  h2 { font-size: 1.15rem !important; }
+  .stButton > button { min-height: 42px !important; }
+  [data-testid="stSidebar"] { width: 85vw !important; min-width: 0 !important; }
 }
 
 /* ═══════════════════════════════════════════════════════
