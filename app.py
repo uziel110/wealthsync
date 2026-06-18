@@ -115,17 +115,27 @@ h2 { font-size: 1.35rem !important; margin-top: 1.5rem !important; }
 .stButton > button[kind="primary"]:hover {
   background: #1D4ED8 !important; box-shadow: 0 4px 12px rgba(37,99,235,.35) !important;
 }
-/* ── filter action buttons (בחר הכל / בטל הכל) ─────── */
-.ws-filter-btn .stButton > button {
-  min-height: 26px !important; height: 26px !important;
-  padding: 0 .65rem !important; font-size: .72rem !important;
+/* ── filter action buttons (הכל / נקה) — targeted by widget key ─────── */
+.st-key-acc_all  button, .st-key-acc_none  button,
+.st-key-type_all button, .st-key-type_none button {
+  min-height: 30px !important; height: 30px !important;
+  padding: 0 .8rem !important; font-size: .72rem !important;
   border-radius: 999px !important; font-weight: 600 !important;
   background: var(--surface) !important;
   border: 1.5px solid var(--border) !important;
   color: var(--muted) !important; box-shadow: none !important;
-  line-height: 1 !important;
+  line-height: 1 !important; width: auto !important; white-space: nowrap !important;
 }
-.ws-filter-btn .stButton > button:hover {
+/* the four filter-button columns shrink to their content so the pills get the
+   space and the buttons never wrap (desktop: avoids the narrow-column squeeze) */
+[data-testid="stColumn"]:has(.st-key-acc_all),
+[data-testid="stColumn"]:has(.st-key-acc_none),
+[data-testid="stColumn"]:has(.st-key-type_all),
+[data-testid="stColumn"]:has(.st-key-type_none) {
+  flex: 0 0 auto !important;
+}
+.st-key-acc_all  button:hover, .st-key-acc_none  button:hover,
+.st-key-type_all button:hover, .st-key-type_none button:hover {
   border-color: var(--primary) !important; color: var(--primary) !important;
   background: var(--primary-lt) !important;
 }
@@ -225,6 +235,15 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
   h2 { font-size: 1.15rem !important; }
   .stButton > button { min-height: 42px !important; }
   [data-testid="stSidebar"] { width: 85vw !important; min-width: 0 !important; }
+  /* filter action buttons (הכל/נקה) sit inline instead of each filling its own
+     stacked row — scoped to the four filter buttons by widget key. Falls back
+     to stacking on browsers without :has(). */
+  [data-testid="stColumn"]:has(.st-key-acc_all),
+  [data-testid="stColumn"]:has(.st-key-acc_none),
+  [data-testid="stColumn"]:has(.st-key-type_all),
+  [data-testid="stColumn"]:has(.st-key-type_none) {
+    min-width: auto !important; flex: 0 0 auto !important; width: auto !important;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -651,15 +670,11 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
                 label_visibility="collapsed",
             ) or []
         with ac:
-            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="acc_all"):
                 st.session_state["filter_accounts"] = accounts; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with nc:
-            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="acc_none"):
                 st.session_state["filter_accounts"] = []; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         # ── asset-type row: label | pills | הכל | נקה ────────────────────────
         lc2, pc2, ac2, nc2 = st.columns([0.65, 5, 0.45, 0.45])
@@ -671,15 +686,11 @@ def filter_bar(df: pd.DataFrame) -> pd.DataFrame:
                 label_visibility="collapsed",
             ) or []
         with ac2:
-            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("הכל ✓", key="type_all"):
                 st.session_state["filter_types"] = type_he_list; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with nc2:
-            st.markdown('<div class="ws-filter-btn">', unsafe_allow_html=True)
             if st.button("נקה ✗", key="type_none"):
                 st.session_state["filter_types"] = []; st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
     rev = {v: k for k, v in type_labels.items()}
     sel_type_keys = [rev[l] for l in sel_types if l in rev]
