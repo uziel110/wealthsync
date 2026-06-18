@@ -244,6 +244,14 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
   [data-testid="stColumn"]:has(.st-key-type_none) {
     min-width: auto !important; flex: 0 0 auto !important; width: auto !important;
   }
+  /* tabs wrap to multiple rows instead of scrolling off-screen — otherwise the
+     4th tab (🔗 מיפוי טיקרים) sits past the screen edge and is undiscoverable */
+  [data-testid="stTabs"] [role="tablist"] {
+    flex-wrap: wrap !important; overflow-x: visible !important; row-gap: .25rem !important;
+  }
+  [data-testid="stTabs"] [role="tab"] {
+    padding-left: .5rem !important; padding-right: .5rem !important;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════
